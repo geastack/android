@@ -1,0 +1,2599 @@
+package @PACKAGE@;
+
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.ColorFilter;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.Path;
+import android.graphics.PixelFormat;
+import android.graphics.Rect;
+import android.graphics.RectF;
+import android.graphics.Shader;
+import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import android.os.Build;
+import android.os.SystemClock;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.Layout;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.StaticLayout;
+import android.text.TextWatcher;
+import android.text.TextPaint;
+import android.text.TextUtils;
+import android.text.style.AbsoluteSizeSpan;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.MetricAffectingSpan;
+import android.view.Choreographer;
+import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
+import android.view.VelocityTracker;
+import android.view.View;
+import android.view.ViewConfiguration;
+import android.view.ViewGroup;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.OverScroller;
+import android.widget.ScrollView;
+import android.widget.TextView;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+
+public final class GeaNativeView extends FrameLayout implements Choreographer.FrameCallback {
+  private static final int FIELDS = 88;
+  private static final float CONFIGURED_DEVICE_PIXEL_RATIO = @DEVICE_PIXEL_RATIO@f;
+  private static final boolean DEBUG_VIEW_BOUNDS = @DEBUG_VIEW_BOUNDS@;
+  private static final int DISPLAY_NONE = 1;
+  private static final int DISPLAY_FLEX = 3;
+  private static final int TYPE_VIEW = 0;
+  private static final int TYPE_TEXT = 1;
+  private static final int TYPE_IMAGE = 2;
+  private static final int TYPE_CANVAS = 3;
+  private static final int TYPE_BUTTON = 4;
+  private static final int TYPE_VIRTUAL_LIST = 5;
+
+  private static final int O_ID = 0;
+  private static final int O_TYPE = 1;
+  private static final int O_PARENT = 2;
+  private static final int O_FIRST_CHILD = 3;
+  private static final int O_NEXT_SIBLING = 4;
+  private static final int O_X = 5;
+  private static final int O_Y = 6;
+  private static final int O_WIDTH = 7;
+  private static final int O_HEIGHT = 8;
+  private static final int O_DISPLAY = 9;
+  private static final int O_HAS_BG = 10;
+  private static final int O_BG_COLOR = 11;
+  private static final int O_TEXT_COLOR = 12;
+  private static final int O_OPACITY = 13;
+  private static final int O_BORDER_WIDTH = 14;
+  private static final int O_BORDER_COLOR = 15;
+  private static final int O_RADIUS = 16;
+  private static final int O_FONT_SIZE = 17;
+  private static final int O_LINE_HEIGHT = 18;
+  private static final int O_TEXT_ALIGN = 19;
+  private static final int O_CLICKABLE = 20;
+  private static final int O_TAG_HASH = 21;
+  private static final int O_TEXT_INDEX = 22;
+  private static final int O_FONT_FAMILY_INDEX = 23;
+  private static final int O_FLEX_DIRECTION = 24;
+  private static final int O_FLEX_DIRECTION_EXPLICIT = 25;
+  private static final int O_JUSTIFY_CONTENT = 26;
+  private static final int O_ALIGN_ITEMS = 27;
+  private static final int O_ALIGN_SELF = 28;
+  private static final int O_OVERFLOW = 29;
+  private static final int O_OVERFLOW_X = 30;
+  private static final int O_OVERFLOW_Y = 31;
+  private static final int O_SCROLL_X = 32;
+  private static final int O_SCROLL_Y = 33;
+  private static final int O_SCROLL_CONTENT_WIDTH = 34;
+  private static final int O_SCROLL_CONTENT_HEIGHT = 35;
+  private static final int O_MOMENTUM = 36;
+  private static final int O_WHITE_SPACE = 37;
+  private static final int O_TEXT_OVERFLOW = 38;
+  private static final int O_IMAGE_ID = 39;
+  private static final int O_TRANSFORM_ROTATE = 40;
+  private static final int O_TRANSFORM_ROTATE_X = 41;
+  private static final int O_TRANSFORM_ROTATE_Y = 42;
+  private static final int O_TRANSFORM_TRANSLATE_X = 43;
+  private static final int O_TRANSFORM_TRANSLATE_Y = 44;
+  private static final int O_TRANSFORM_TRANSLATE_Z = 45;
+  private static final int O_TRANSFORM_TRANSLATE_X_PERCENT = 46;
+  private static final int O_TRANSFORM_TRANSLATE_Y_PERCENT = 47;
+  private static final int O_TRANSFORM_SCALE_X = 48;
+  private static final int O_TRANSFORM_SCALE_Y = 49;
+  private static final int O_TRANSFORM_ORIGIN_X = 50;
+  private static final int O_TRANSFORM_ORIGIN_Y = 51;
+  private static final int O_PERSPECTIVE = 52;
+  private static final int O_PERSPECTIVE_ORIGIN_X = 53;
+  private static final int O_PERSPECTIVE_ORIGIN_Y = 54;
+  private static final int O_Z_INDEX = 55;
+  private static final int O_BACKFACE_HIDDEN = 56;
+  private static final int O_BG_FILL = 57;
+  private static final int O_BG_ALPHA = 58;
+  private static final int O_BG_GRADIENT_FROM_COLOR = 59;
+  private static final int O_BG_GRADIENT_MID_COLOR = 60;
+  private static final int O_BG_GRADIENT_TO_COLOR = 61;
+  private static final int O_BG_GRADIENT_MID_STOP = 62;
+  private static final int O_BG_GRADIENT_TO_STOP = 63;
+  private static final int O_BG_GRADIENT_HAS_MID = 64;
+  private static final int O_BG_GRADIENT_ANGLE = 65;
+  private static final int O_BG_GRID_AXES = 66;
+  private static final int O_BG_GRID_COLOR = 67;
+  private static final int O_BG_GRID_STEP_X = 68;
+  private static final int O_BG_GRID_STEP_Y = 69;
+  private static final int O_BG_GRID_LINE_X = 70;
+  private static final int O_BG_GRID_LINE_Y = 71;
+  private static final int O_PROJECTED = 72;
+  private static final int O_PROJECTED_X0 = 73;
+  private static final int O_PROJECTED_Y0 = 74;
+  private static final int O_PROJECTED_X1 = 75;
+  private static final int O_PROJECTED_Y1 = 76;
+  private static final int O_PROJECTED_X2 = 77;
+  private static final int O_PROJECTED_Y2 = 78;
+  private static final int O_PROJECTED_X3 = 79;
+  private static final int O_PROJECTED_Y3 = 80;
+  private static final int O_PROJECTED_DEPTH = 81;
+  private static final int O_TEXT_TRANSFORM = 82;
+  private static final int O_PADDING_TOP = 83;
+  private static final int O_PADDING_RIGHT = 84;
+  private static final int O_PADDING_BOTTOM = 85;
+  private static final int O_PADDING_LEFT = 86;
+  private static final int O_FONT_WEIGHT = 87;
+  private static final int TAG_P = tagHash("p");
+  private static final int TAG_INPUT = tagHash("input");
+  private static final int MAX_TOUCH_SLOTS = 10;
+  private static final int NATIVE_SCROLL_TOUCH_SLOP = 8;
+  private static final float NATIVE_SCROLL_FLING_BOOST = 1.35f;
+
+  private final Map<Integer, View> views = new HashMap<>();
+  private final Map<Integer, Bitmap> imageBitmaps = new HashMap<>();
+  private final Map<String, Typeface> typefaces = new HashMap<>();
+  private final Map<Integer, Integer> backgroundHashes = new HashMap<>();
+  private final Map<Integer, Integer> textHashes = new HashMap<>();
+  private final Map<Integer, Matrix> projectionMatrices = new HashMap<>();
+  private final Map<Integer, Boolean> projectedDescendantCache = new HashMap<>();
+  private final Set<Integer> seen = new HashSet<>();
+  private final CanvasLayer canvasLayer;
+  private final SurfaceLayer surfaceLayer;
+  private final ProjectedOverlayView projectedOverlay;
+  private final float[] projectedSrc = new float[8];
+  private final float[] projectedDst = new float[8];
+  private final Rect nativeInputHitRect = new Rect();
+  private final Rect nativeScrollHitRect = new Rect();
+  private static final Map<String, Typeface> measureTypefaces = new HashMap<>();
+  private static Context appContext;
+  private final int[] touchPointerIds = new int[MAX_TOUCH_SLOTS];
+  private boolean nativeInputTouchActive;
+  private int nativeScrollTouchNodeId = -1;
+  private ScrollNodeView nativeScrollTouchTarget;
+  private int nativeScrollStartX;
+  private int nativeScrollStartY;
+  private int nativeScrollLastX;
+  private int nativeScrollLastY;
+  private int nativeScrollAxis;
+  private boolean nativeScrollStarted;
+  private final OverScroller nativeScrollFling;
+  private final Runnable nativeScrollFlingStep;
+  private final int nativeScrollMinimumFlingVelocity;
+  private final int nativeScrollMaximumFlingVelocity;
+  private VelocityTracker nativeScrollVelocityTracker;
+  private int nativeScrollFlingNodeId = -1;
+  private ScrollNodeView nativeScrollFlingTarget;
+  private int nativeScrollFlingLastX;
+  private int nativeScrollFlingLastY;
+  private boolean running;
+  private boolean initialized;
+  private boolean frameScheduled;
+  private boolean mountedUiModeKnown;
+  private boolean mountedUiMode;
+  private boolean framePresented;
+  private long pendingFrameTimeNanos;
+
+  public GeaNativeView(Context context) {
+    super(context);
+    nativeScrollFling = new OverScroller(context);
+    ViewConfiguration viewConfig = ViewConfiguration.get(context);
+    nativeScrollMinimumFlingVelocity = viewConfig.getScaledMinimumFlingVelocity();
+    nativeScrollMaximumFlingVelocity = viewConfig.getScaledMaximumFlingVelocity();
+    nativeScrollFlingStep = new Runnable() {
+      @Override
+      public void run() {
+        runNativeScrollFling();
+      }
+    };
+    Context applicationContext = context.getApplicationContext();
+    appContext = applicationContext != null ? applicationContext : context;
+    GeaNativeBridge.setApplicationContext(appContext);
+    setBackgroundColor(Color.BLACK);
+    setClipChildren(false);
+    setClipToPadding(false);
+    // Bottom-most child: the native framebuffer is posted straight to this
+    // SurfaceView's buffer queue (GPU-composited by SurfaceFlinger), skipping
+    // the Bitmap + HWUI-upload path. CanvasLayer stays above it as the
+    // fallback while the surface isn't ready.
+    surfaceLayer = new SurfaceLayer(this, context);
+    addView(surfaceLayer, new FrameLayout.LayoutParams(
+        FrameLayout.LayoutParams.MATCH_PARENT,
+        FrameLayout.LayoutParams.MATCH_PARENT));
+    canvasLayer = new CanvasLayer(this, context);
+    addView(canvasLayer, new FrameLayout.LayoutParams(
+        FrameLayout.LayoutParams.MATCH_PARENT,
+        FrameLayout.LayoutParams.MATCH_PARENT));
+    projectedOverlay = new ProjectedOverlayView(this, context);
+    resetTouchSlots();
+  }
+
+  public void resume() {
+    if (running) return;
+    running = true;
+    requestFrame();
+  }
+
+  public void pause() {
+    running = false;
+    Choreographer.getInstance().removeFrameCallback(this);
+    removeCallbacks(framePump);
+    stopNativeScrollFling();
+    frameScheduled = false;
+  }
+
+  @Override
+  protected void onAttachedToWindow() {
+    super.onAttachedToWindow();
+    resume();
+  }
+
+  @Override
+  protected void onDetachedFromWindow() {
+    pause();
+    super.onDetachedFromWindow();
+  }
+
+  @Override
+  protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+    super.onSizeChanged(w, h, oldw, oldh);
+    requestFrame();
+  }
+
+  @Override
+  public void doFrame(long frameTimeNanos) {
+    frameScheduled = false;
+    if (!running) return;
+    int width = getWidth();
+    int height = getHeight();
+    if (width > 0 && height > 0 && usesMountedUiMode(width, height, devicePixelRatio())) {
+      syncFromNative(frameTimeNanos);
+      return;
+    }
+    pendingFrameTimeNanos = frameTimeNanos;
+    canvasLayer.invalidate();
+  }
+
+  @Override
+  public boolean dispatchTouchEvent(MotionEvent event) {
+    if (event != null) {
+      int action = event.getActionMasked();
+      if (action == MotionEvent.ACTION_DOWN) {
+        stopNativeScrollFling();
+        nativeInputTouchActive = hitNativeInput(event.getRawX(), event.getRawY()) != null;
+        resetNativeScrollTouch();
+        if (!nativeInputTouchActive) {
+          nativeScrollTouchTarget = hitNativeScroll(event.getRawX(), event.getRawY());
+          nativeScrollTouchNodeId = nativeScrollTouchTarget != null ? nativeScrollTouchTarget.nodeId : -1;
+          nativeScrollStartX = Math.round(event.getX());
+          nativeScrollStartY = Math.round(event.getY());
+          nativeScrollLastX = Math.round(event.getX());
+          nativeScrollLastY = Math.round(event.getY());
+          if (nativeScrollTouchTarget != null) {
+            nativeScrollVelocityTracker = VelocityTracker.obtain();
+            nativeScrollVelocityTracker.addMovement(event);
+          }
+        }
+      }
+      if (nativeInputTouchActive) {
+        boolean handled = super.dispatchTouchEvent(event);
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+          nativeInputTouchActive = false;
+        }
+        if (handled) requestFrame();
+        return handled;
+      }
+      if (nativeScrollTouchTarget != null) {
+        if (nativeScrollVelocityTracker != null && action != MotionEvent.ACTION_DOWN) nativeScrollVelocityTracker.addMovement(event);
+        if (action == MotionEvent.ACTION_MOVE) {
+          int x = Math.round(event.getX());
+          int y = Math.round(event.getY());
+          int dx = x - nativeScrollLastX;
+          int dy = y - nativeScrollLastY;
+          if (nativeScrollAxis == 0) {
+            int totalDx = x - nativeScrollStartX;
+            int totalDy = y - nativeScrollStartY;
+            if (Math.abs(totalDx) > NATIVE_SCROLL_TOUCH_SLOP || Math.abs(totalDy) > NATIVE_SCROLL_TOUCH_SLOP) {
+              boolean canScrollX = nativeScrollTouchTarget.canScrollX();
+              boolean canScrollY = nativeScrollTouchTarget.canScrollY();
+              if (canScrollX && (!canScrollY || Math.abs(totalDx) >= Math.abs(totalDy))) nativeScrollAxis = 1;
+              else if (canScrollY) nativeScrollAxis = 2;
+            }
+          }
+          boolean changed = false;
+          if (nativeScrollAxis == 1 && dx != 0) {
+            changed = GeaNativeBridge.nativeScrollBy(nativeScrollTouchNodeId, -dx, 0);
+          } else if (nativeScrollAxis == 2 && dy != 0) {
+            changed = GeaNativeBridge.nativeScrollBy(nativeScrollTouchNodeId, 0, -dy);
+          }
+          if (nativeScrollAxis != 0) {
+            nativeScrollStarted = true;
+            nativeScrollLastX = x;
+            nativeScrollLastY = y;
+            if (changed) requestFrame();
+            return true;
+          }
+        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+          if (nativeScrollStarted) {
+            if (action == MotionEvent.ACTION_UP) startNativeScrollFling(event);
+            GeaNativeBridge.nativeTouch(0, false, Math.round(event.getX()), Math.round(event.getY()), 0);
+            resetTouchSlots();
+            resetNativeScrollTouch();
+            requestFrame();
+            return true;
+          }
+          resetNativeScrollTouch();
+        }
+      }
+    }
+    boolean changed = dispatchNativeTouch(event);
+    if (changed) requestFrame();
+    return true;
+  }
+
+  private EditTextNodeView hitNativeInput(float rawX, float rawY) {
+    int x = Math.round(rawX);
+    int y = Math.round(rawY);
+    for (View view : views.values()) {
+      if (!(view instanceof EditTextNodeView)) continue;
+      if (view.getVisibility() != VISIBLE) continue;
+      if (!view.getGlobalVisibleRect(nativeInputHitRect)) continue;
+      if (nativeInputHitRect.contains(x, y)) return (EditTextNodeView) view;
+    }
+    return null;
+  }
+
+  private ScrollNodeView hitNativeScroll(float rawX, float rawY) {
+    int x = Math.round(rawX);
+    int y = Math.round(rawY);
+    ScrollNodeView best = null;
+    int bestArea = Integer.MAX_VALUE;
+    for (Map.Entry<Integer, View> entry : views.entrySet()) {
+      View view = entry.getValue();
+      if (!(view instanceof ScrollNodeView)) continue;
+      if (view.getVisibility() != VISIBLE) continue;
+      if (!view.getGlobalVisibleRect(nativeScrollHitRect)) continue;
+      if (!nativeScrollHitRect.contains(x, y)) continue;
+      int area = Math.max(1, nativeScrollHitRect.width()) * Math.max(1, nativeScrollHitRect.height());
+      if (area >= bestArea) continue;
+      ScrollNodeView scroll = (ScrollNodeView) view;
+      scroll.nodeId = entry.getKey();
+      best = scroll;
+      bestArea = area;
+    }
+    return best;
+  }
+
+  private void resetNativeScrollTouch() {
+    if (nativeScrollVelocityTracker != null) {
+      nativeScrollVelocityTracker.recycle();
+      nativeScrollVelocityTracker = null;
+    }
+    nativeScrollTouchNodeId = -1;
+    nativeScrollTouchTarget = null;
+    nativeScrollStartX = 0;
+    nativeScrollStartY = 0;
+    nativeScrollLastX = 0;
+    nativeScrollLastY = 0;
+    nativeScrollAxis = 0;
+    nativeScrollStarted = false;
+  }
+
+  private void startNativeScrollFling(MotionEvent event) {
+    if (nativeScrollVelocityTracker == null || nativeScrollTouchTarget == null) return;
+    if (!nativeScrollTouchTarget.hasMomentum()) return;
+    nativeScrollVelocityTracker.computeCurrentVelocity(1000, nativeScrollMaximumFlingVelocity);
+    int velocityX = nativeScrollAxis == 1 ? Math.round(-nativeScrollVelocityTracker.getXVelocity()) : 0;
+    int velocityY = nativeScrollAxis == 2 ? Math.round(-nativeScrollVelocityTracker.getYVelocity()) : 0;
+    long durationMs = Math.max(1L, event.getEventTime() - event.getDownTime());
+    int endX = Math.round(event.getX());
+    int endY = Math.round(event.getY());
+    int fallbackVelocityX = nativeScrollAxis == 1 ? Math.round((nativeScrollStartX - endX) * 1000.0f / durationMs) : 0;
+    int fallbackVelocityY = nativeScrollAxis == 2 ? Math.round((nativeScrollStartY - endY) * 1000.0f / durationMs) : 0;
+    if (Math.abs(velocityX) < nativeScrollMinimumFlingVelocity && Math.abs(fallbackVelocityX) >= nativeScrollMinimumFlingVelocity) {
+      velocityX = fallbackVelocityX;
+    }
+    if (Math.abs(velocityY) < nativeScrollMinimumFlingVelocity && Math.abs(fallbackVelocityY) >= nativeScrollMinimumFlingVelocity) {
+      velocityY = fallbackVelocityY;
+    }
+    if (Math.abs(velocityX) < nativeScrollMinimumFlingVelocity) velocityX = 0;
+    if (Math.abs(velocityY) < nativeScrollMinimumFlingVelocity) velocityY = 0;
+    if (velocityX == 0 && velocityY == 0) return;
+    velocityX = boostNativeScrollVelocity(velocityX);
+    velocityY = boostNativeScrollVelocity(velocityY);
+
+    nativeScrollFlingTarget = nativeScrollTouchTarget;
+    nativeScrollFlingNodeId = nativeScrollTouchNodeId;
+    nativeScrollFlingLastX = nativeScrollFlingTarget.getScrollX();
+    nativeScrollFlingLastY = nativeScrollFlingTarget.getScrollY();
+    nativeScrollFling.fling(
+        nativeScrollFlingLastX,
+        nativeScrollFlingLastY,
+        velocityX,
+        velocityY,
+        0,
+        nativeScrollFlingTarget.maxScrollX(),
+        0,
+        nativeScrollFlingTarget.maxScrollY());
+    removeCallbacks(nativeScrollFlingStep);
+    postOnAnimation(nativeScrollFlingStep);
+  }
+
+  private int boostNativeScrollVelocity(int velocity) {
+    if (velocity == 0) return 0;
+    int boosted = Math.round(velocity * NATIVE_SCROLL_FLING_BOOST);
+    if (boosted > nativeScrollMaximumFlingVelocity) return nativeScrollMaximumFlingVelocity;
+    if (boosted < -nativeScrollMaximumFlingVelocity) return -nativeScrollMaximumFlingVelocity;
+    return boosted;
+  }
+
+  private void runNativeScrollFling() {
+    if (nativeScrollFlingNodeId < 0 || nativeScrollFlingTarget == null) return;
+    if (views.get(nativeScrollFlingNodeId) != nativeScrollFlingTarget) {
+      clearNativeScrollFling();
+      return;
+    }
+    if (!nativeScrollFling.computeScrollOffset()) {
+      clearNativeScrollFling();
+      return;
+    }
+
+    int nextX = nativeScrollFling.getCurrX();
+    int nextY = nativeScrollFling.getCurrY();
+    int dx = nextX - nativeScrollFlingLastX;
+    int dy = nextY - nativeScrollFlingLastY;
+    nativeScrollFlingLastX = nextX;
+    nativeScrollFlingLastY = nextY;
+    boolean moved = dx != 0 || dy != 0;
+    boolean changed = !moved || GeaNativeBridge.nativeScrollBy(nativeScrollFlingNodeId, dx, dy);
+    if (changed && moved) requestFrame();
+    if (!changed) {
+      stopNativeScrollFling();
+      return;
+    }
+    if (nativeScrollFling.isFinished()) {
+      clearNativeScrollFling();
+      return;
+    }
+    postOnAnimation(nativeScrollFlingStep);
+  }
+
+  private void stopNativeScrollFling() {
+    if (!nativeScrollFling.isFinished()) nativeScrollFling.forceFinished(true);
+    removeCallbacks(nativeScrollFlingStep);
+    clearNativeScrollFling();
+  }
+
+  private void clearNativeScrollFling() {
+    nativeScrollFlingNodeId = -1;
+    nativeScrollFlingTarget = null;
+    nativeScrollFlingLastX = 0;
+    nativeScrollFlingLastY = 0;
+  }
+
+  private boolean dispatchNativeTouch(MotionEvent event) {
+    int action = event.getActionMasked();
+    int index = event.getActionIndex();
+    if (index < 0 || index >= event.getPointerCount()) index = 0;
+    int x = Math.round(event.getX(index));
+    int y = Math.round(event.getY(index));
+    if (action == MotionEvent.ACTION_DOWN) {
+      resetTouchSlots();
+      int slot = assignTouchSlot(Math.max(0, event.getPointerId(index)));
+      return slot >= 0 && GeaNativeBridge.nativeTouch(1, true, x, y, slot);
+    }
+    if (action == MotionEvent.ACTION_POINTER_DOWN) {
+      int slot = assignTouchSlot(Math.max(0, event.getPointerId(index)));
+      return slot >= 0 && GeaNativeBridge.nativeTouch(1, true, x, y, slot);
+    }
+    if (action == MotionEvent.ACTION_MOVE) {
+      boolean changed = false;
+      for (int i = 0; i < event.getPointerCount(); i++) {
+        int slot = findTouchSlot(Math.max(0, event.getPointerId(i)));
+        if (slot < 0) continue;
+        changed = GeaNativeBridge.nativeTouch(
+            2,
+            true,
+            Math.round(event.getX(i)),
+            Math.round(event.getY(i)),
+            slot) || changed;
+      }
+      return changed;
+    }
+    if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP) {
+      int slot = findTouchSlot(Math.max(0, event.getPointerId(index)));
+      if (slot < 0) return false;
+      boolean changed = GeaNativeBridge.nativeTouch(3, false, x, y, slot);
+      releaseTouchSlot(slot);
+      if (action == MotionEvent.ACTION_UP) resetTouchSlots();
+      return changed;
+    }
+    if (action == MotionEvent.ACTION_CANCEL) {
+      resetTouchSlots();
+      return GeaNativeBridge.nativeTouch(0, false, x, y, 0);
+    }
+    return false;
+  }
+
+  private void resetTouchSlots() {
+    for (int i = 0; i < touchPointerIds.length; i++) {
+      touchPointerIds[i] = -1;
+    }
+  }
+
+  private int findTouchSlot(int pointerId) {
+    for (int i = 0; i < touchPointerIds.length; i++) {
+      if (touchPointerIds[i] == pointerId) return i;
+    }
+    return -1;
+  }
+
+  private int assignTouchSlot(int pointerId) {
+    int existing = findTouchSlot(pointerId);
+    if (existing >= 0) return existing;
+    for (int i = 0; i < touchPointerIds.length; i++) {
+      if (touchPointerIds[i] >= 0) continue;
+      touchPointerIds[i] = pointerId;
+      return i;
+    }
+    return -1;
+  }
+
+  private void releaseTouchSlot(int slot) {
+    if (slot >= 0 && slot < touchPointerIds.length) touchPointerIds[slot] = -1;
+  }
+
+  private void syncFromNative(long frameTimeNanos) {
+    int width = getWidth();
+    int height = getHeight();
+    if (width <= 0 || height <= 0) return;
+    float dpr = devicePixelRatio();
+    if (!initialized) {
+      GeaNativeBridge.nativeInit(width, height, dpr);
+      initialized = true;
+    }
+
+    // Present-then-render: post the PREVIOUS frame's pixels the moment a
+    // buffer frees up, then spend the frame budget rendering the next one.
+    // Queuing right after the buffer release (instead of after ~7ms of app
+    // work) keeps the queue a full frame ahead of SurfaceFlinger's latch, so
+    // jitter no longer costs a whole vsync. One frame of latency, paid for
+    // vsync-solid pacing.
+    long t0 = System.nanoTime();
+    boolean blitted = framePresented && surfaceLayer.surfaceReady && GeaNativeBridge.nativeBlitToSurface();
+    long tBlit = System.nanoTime();
+    int[] nodes = GeaNativeBridge.nativeFrame(width, height, dpr, frameTimeNanos);
+    if (nodes == null) {
+      requestFrame();
+      return;
+    }
+    long t1 = System.nanoTime();
+    String[] texts = GeaNativeBridge.nativeTexts();
+    if (texts == null) texts = new String[0];
+    reconcile(nodes, texts);
+    long t2 = System.nanoTime();
+    if (hasCanvasNode(nodes)) {
+      framePresented = true;
+      if (!blitted && surfaceLayer.surfaceReady) blitted = GeaNativeBridge.nativeBlitToSurface();
+      if (!blitted) canvasLayer.syncFrame();
+      else canvasLayer.clearBitmap();
+    }
+    long t3 = System.nanoTime();
+    perfNativeFrameUs += (t1 - tBlit) / 1000;
+    perfReconcileUs += (t2 - t1) / 1000;
+    perfCanvasSyncUs += ((t3 - t2) + (tBlit - t0)) / 1000;
+    if (perfLastVsyncNs != 0) {
+      long gapNs = frameTimeNanos - perfLastVsyncNs;
+      int vsyncs = (int) ((gapNs + 8333333L) / 16666667L);
+      if (vsyncs <= 1) perfGap1++;
+      else if (vsyncs == 2) perfGap2++;
+      else perfGap3++;
+      if (gapNs > perfGapMaxNs) perfGapMaxNs = gapNs;
+    }
+    perfLastVsyncNs = frameTimeNanos;
+    perfFrames++;
+    if (perfWindowStartMs == 0) perfWindowStartMs = t3 / 1000000;
+    long elapsedMs = t3 / 1000000 - perfWindowStartMs;
+    if (elapsedMs >= 1000) {
+      android.util.Log.i("gea.loopjava", String.format(java.util.Locale.US,
+          "frames=%d | nativeFrame=%.2fms reconcile=%.2fms canvasSync=%.2fms | vsync gaps 1:%d 2:%d 3+:%d max=%.1fms",
+          perfFrames,
+          perfNativeFrameUs / 1000.0 / perfFrames,
+          perfReconcileUs / 1000.0 / perfFrames,
+          perfCanvasSyncUs / 1000.0 / perfFrames,
+          perfGap1, perfGap2, perfGap3, perfGapMaxNs / 1e6));
+      perfFrames = 0;
+      perfNativeFrameUs = 0;
+      perfReconcileUs = 0;
+      perfCanvasSyncUs = 0;
+      perfGap1 = 0;
+      perfGap2 = 0;
+      perfGap3 = 0;
+      perfGapMaxNs = 0;
+      perfWindowStartMs = t3 / 1000000;
+    }
+    if (GeaNativeBridge.nativeNeedsFrame()) requestFrame();
+  }
+
+  private long perfWindowStartMs;
+  private long perfNativeFrameUs;
+  private long perfReconcileUs;
+  private long perfCanvasSyncUs;
+  private long perfLastVsyncNs;
+  private long perfGapMaxNs;
+  private int perfGap1;
+  private int perfGap2;
+  private int perfGap3;
+  private int perfFrames;
+
+  private boolean usesMountedUiMode(int width, int height, float dpr) {
+    if (!mountedUiModeKnown) {
+      mountedUiMode = GeaNativeBridge.nativeHasMountedRoot(width, height, dpr);
+      mountedUiModeKnown = true;
+    }
+    return mountedUiMode;
+  }
+
+  private boolean drawNativeFrame(Canvas canvas) {
+    int width = getWidth();
+    int height = getHeight();
+    if (width <= 0 || height <= 0) return false;
+    float dpr = devicePixelRatio();
+    if (usesMountedUiMode(width, height, dpr)) return false;
+    if (!initialized) {
+      GeaNativeBridge.nativeInit(width, height, dpr);
+      initialized = true;
+    }
+
+    long frameTime = pendingFrameTimeNanos != 0 ? pendingFrameTimeNanos : System.nanoTime();
+    int[] nodes = GeaNativeBridge.nativeDrawFrame(canvas, width, height, dpr, frameTime);
+    if (nodes == null) {
+      requestFrame();
+      return true;
+    }
+    String[] texts = GeaNativeBridge.nativeTexts();
+    if (texts == null) texts = new String[0];
+    reconcile(nodes, texts);
+    if (GeaNativeBridge.nativeNeedsFrame()) requestFrame();
+    boolean drewNativeCanvas = GeaNativeBridge.nativeDidDrawNativeCanvas();
+    if (!drewNativeCanvas) canvasLayer.syncFrame();
+    return drewNativeCanvas;
+  }
+
+  // Free-running frame pump: the Choreographer on this platform delivers our
+  // callback only every other vsync even when the frame work fits well inside
+  // one (measured: 8.7ms work, gaps locked at 2 vsyncs -> 30fps). Posting a
+  // plain Handler message instead lets the SurfaceView BufferQueue provide the
+  // pacing (ANativeWindow_lock blocks when SurfaceFlinger is behind), which
+  // tracks the panel's real 60Hz. Input events still interleave because each
+  // frame is one message on the UI looper.
+  private final Runnable framePump = new Runnable() {
+    @Override
+    public void run() {
+      doFrame(System.nanoTime());
+    }
+  };
+
+  private void requestFrame() {
+    if (!running || frameScheduled) return;
+    frameScheduled = true;
+    post(framePump);
+  }
+
+  private float devicePixelRatio() {
+    if (CONFIGURED_DEVICE_PIXEL_RATIO > 0.0f) return CONFIGURED_DEVICE_PIXEL_RATIO;
+    float density = getResources().getDisplayMetrics().density;
+    return density > 0.0f ? density : 1.0f;
+  }
+
+  private void reconcile(int[] nodes, String[] texts) {
+    seen.clear();
+    projectedDescendantCache.clear();
+    int count = nodes.length / FIELDS;
+    for (int i = 0; i < count; i++) {
+      int base = i * FIELDS;
+      int parentId = nodes[base + O_PARENT];
+      if (parentId < 0) ensureNode(nodes, texts, base);
+    }
+    for (Integer id : new HashSet<>(views.keySet())) {
+      if (seen.contains(id)) continue;
+      View gone = views.remove(id);
+      backgroundHashes.remove(id);
+      textHashes.remove(id);
+      projectionMatrices.remove(id);
+      if (gone != null && gone.getParent() instanceof FrameLayout) {
+        ((FrameLayout) gone.getParent()).removeView(gone);
+      }
+    }
+    int overlayOriginBase = attachProjectedOverlay(nodes);
+    int originX = overlayOriginBase >= 0 ? nodes[overlayOriginBase + O_X] : 0;
+    int originY = overlayOriginBase >= 0 ? nodes[overlayOriginBase + O_Y] : 0;
+    projectedOverlay.setFrame(nodes, texts, originX, originY);
+    orderProjectedOverlay(nodes);
+  }
+
+  private int attachProjectedOverlay(int[] nodes) {
+    int rootBase = -1;
+    int count = nodes.length / FIELDS;
+    for (int i = 0; i < count; i++) {
+      int base = i * FIELDS;
+      if (nodes[base + O_PARENT] < 0) {
+        rootBase = base;
+        break;
+      }
+    }
+    View rootView = rootBase >= 0 ? views.get(nodes[rootBase + O_ID]) : null;
+    FrameLayout host = childHostFor(rootView);
+    if (host == null) host = this;
+    if (projectedOverlay.getParent() != host) {
+      if (projectedOverlay.getParent() instanceof ViewGroup) {
+        ((ViewGroup) projectedOverlay.getParent()).removeView(projectedOverlay);
+      }
+      host.addView(projectedOverlay, new FrameLayout.LayoutParams(
+          FrameLayout.LayoutParams.MATCH_PARENT,
+          FrameLayout.LayoutParams.MATCH_PARENT));
+    }
+    return rootBase;
+  }
+
+  private void orderProjectedOverlay(int[] nodes) {
+    int maxProjectedZ = Integer.MIN_VALUE;
+    int count = nodes.length / FIELDS;
+    for (int i = 0; i < count; i++) {
+      int base = i * FIELDS;
+      if (nodes[base + O_PROJECTED] != 0) maxProjectedZ = Math.max(maxProjectedZ, effectiveZ(nodes, base));
+    }
+    if (maxProjectedZ == Integer.MIN_VALUE) return;
+    projectedOverlay.bringToFront();
+    for (int i = 0; i < count; i++) {
+      int base = i * FIELDS;
+      if (nodes[base + O_PROJECTED] != 0) continue;
+      if (nodes[base + O_PARENT] < 0) continue;
+      if (effectiveZ(nodes, base) <= maxProjectedZ) continue;
+      View view = views.get(nodes[base + O_ID]);
+      if (view != null) view.bringToFront();
+    }
+  }
+
+  private int effectiveZ(int[] nodes, int base) {
+    int z = 0;
+    for (int current = base; current >= 0; ) {
+      z += nodes[current + O_Z_INDEX];
+      int parentId = nodes[current + O_PARENT];
+      current = parentId >= 0 ? findBase(nodes, parentId) : -1;
+    }
+    return z;
+  }
+
+  private View ensureNode(int[] nodes, String[] texts, int base) {
+    int id = nodes[base + O_ID];
+    if (seen.contains(id)) return views.get(id);
+    seen.add(id);
+
+    boolean wantsParagraphView = nodes[base + O_TAG_HASH] == TAG_P;
+    boolean wantsInputView = isInputNode(nodes, base);
+    boolean wantsTextView = nodes[base + O_TYPE] == TYPE_TEXT;
+    boolean wantsImageView = nodes[base + O_TYPE] == TYPE_IMAGE;
+    boolean wantsScrollView = isScrollableNode(nodes, base);
+    View view = views.get(id);
+    if (view == null || !matchesType(view, wantsTextView, wantsImageView, wantsScrollView, wantsParagraphView, wantsInputView)) {
+      if (view != null && view.getParent() instanceof ViewGroup) {
+        ((ViewGroup) view.getParent()).removeView(view);
+      }
+      backgroundHashes.remove(id);
+      textHashes.remove(id);
+      projectionMatrices.remove(id);
+      view = createView(wantsTextView, wantsImageView, wantsScrollView, wantsParagraphView, wantsInputView);
+      views.put(id, view);
+    }
+
+    applyProps(view, nodes, texts, base);
+
+    int parentId = nodes[base + O_PARENT];
+    FrameLayout parent = this;
+    int parentX = 0;
+    int parentY = 0;
+    int parentBase = -1;
+    if (parentId >= 0) {
+      parentBase = findBase(nodes, parentId);
+      View parentView = parentBase >= 0 ? ensureNode(nodes, texts, parentBase) : null;
+      FrameLayout host = childHostFor(parentView);
+      if (host != null) parent = host;
+      if (parentBase >= 0) {
+        parentX = nodes[parentBase + O_X];
+        parentY = nodes[parentBase + O_Y];
+      }
+    }
+    if (view.getParent() != parent) {
+      if (view.getParent() instanceof ViewGroup) ((ViewGroup) view.getParent()).removeView(view);
+      parent.addView(view);
+    }
+    place(view, nodes, base, parentBase, nodes[base + O_X] - parentX, nodes[base + O_Y] - parentY, nodes[base + O_WIDTH], nodes[base + O_HEIGHT]);
+    if (view instanceof ParagraphNodeView) return view;
+
+    for (int child = nodes[base + O_FIRST_CHILD]; child >= 0; ) {
+      int childBase = findBase(nodes, child);
+      if (childBase < 0) break;
+      ensureNode(nodes, texts, childBase);
+      child = nodes[childBase + O_NEXT_SIBLING];
+    }
+    orderProjectedChildren(childHostFor(view), nodes, base);
+    return view;
+  }
+
+  private int findBase(int[] nodes, int id) {
+    int count = nodes.length / FIELDS;
+    for (int i = 0; i < count; i++) {
+      int base = i * FIELDS;
+      if (nodes[base + O_ID] == id) return base;
+    }
+    return -1;
+  }
+
+  private FrameLayout childHostFor(View view) {
+    if (view instanceof ScrollNodeView) return ((ScrollNodeView) view).content;
+    if (view instanceof FrameLayout) return (FrameLayout) view;
+    return null;
+  }
+
+  private boolean isScrollableNode(int[] nodes, int base) {
+    if (nodes[base + O_TYPE] == TYPE_TEXT) return false;
+    if (nodes[base + O_TYPE] == TYPE_IMAGE) return false;
+    if (isInputNode(nodes, base)) return false;
+    if (nodes[base + O_DISPLAY] == DISPLAY_NONE) return false;
+    boolean horizontal = nodes[base + O_OVERFLOW_X] == 2 && nodes[base + O_SCROLL_CONTENT_WIDTH] > nodes[base + O_WIDTH];
+    boolean vertical = nodes[base + O_OVERFLOW_Y] == 2 && nodes[base + O_SCROLL_CONTENT_HEIGHT] > nodes[base + O_HEIGHT];
+    boolean virtualList = nodes[base + O_TYPE] == TYPE_VIRTUAL_LIST && nodes[base + O_SCROLL_CONTENT_HEIGHT] > nodes[base + O_HEIGHT];
+    return horizontal || vertical || virtualList;
+  }
+
+  private boolean isInputNode(int[] nodes, int base) {
+    return nodes[base + O_TYPE] == TYPE_VIEW && nodes[base + O_TAG_HASH] == TAG_INPUT;
+  }
+
+  private boolean hasCanvasNode(int[] nodes) {
+    int count = nodes.length / FIELDS;
+    for (int i = 0; i < count; i++) {
+      if (nodes[i * FIELDS + O_TYPE] == TYPE_CANVAS) return true;
+    }
+    return false;
+  }
+
+  private boolean matchesType(View view, boolean wantsTextView, boolean wantsImageView, boolean wantsScrollView, boolean wantsParagraphView, boolean wantsInputView) {
+    if (wantsInputView) return view instanceof EditTextNodeView;
+    if (wantsParagraphView) return view instanceof ParagraphNodeView;
+    if (wantsImageView) return view instanceof ImageNodeView;
+    if (wantsTextView) return view instanceof TextNodeView && !(view instanceof ParagraphNodeView);
+    if (wantsScrollView) return view instanceof ScrollNodeView;
+    if (view instanceof EditTextNodeView) return false;
+    if (view instanceof ImageNodeView) return false;
+    if (view instanceof ScrollNodeView) return false;
+    if (view instanceof ParagraphNodeView) return false;
+    return view instanceof FrameLayout && !(view instanceof TextNodeView);
+  }
+
+  private View createView(boolean textView, boolean imageView, boolean scrollView, boolean paragraphView, boolean inputView) {
+    if (inputView) return new EditTextNodeView(this, getContext());
+    if (paragraphView) {
+      ParagraphNodeView node = new ParagraphNodeView(getContext());
+      configureTextView(node.text);
+      node.setBoundedTextWidth(true);
+      return node;
+    }
+    if (imageView) return new ImageNodeView(getContext());
+    if (textView) {
+      TextNodeView node = new TextNodeView(getContext());
+      configureTextView(node.text);
+      node.text.setTypeface(Typeface.DEFAULT, Typeface.NORMAL);
+      return node;
+    }
+    if (scrollView) return new ScrollNodeView(getContext());
+    FrameLayout container = new FrameLayout(getContext());
+    container.setClipChildren(false);
+    container.setClipToPadding(false);
+    return container;
+  }
+
+  private void configureTextView(TextView text) {
+    text.setIncludeFontPadding(false);
+    text.setGravity(Gravity.CENTER);
+    text.setTextAlignment(View.TEXT_ALIGNMENT_GRAVITY);
+    text.setSingleLine(false);
+    text.setMaxLines(Integer.MAX_VALUE);
+    text.setHorizontallyScrolling(false);
+    text.setEllipsize(null);
+    text.setElegantTextHeight(false);
+    if (Build.VERSION.SDK_INT >= 28) text.setFallbackLineSpacing(false);
+    text.setMinWidth(0);
+    text.setMinimumWidth(0);
+    text.setMinHeight(0);
+    text.setMinimumHeight(0);
+    text.setPadding(0, 0, 0, 0);
+    text.setLineSpacing(0.0f, 1.0f);
+    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) text.getLayoutParams();
+    if (lp == null) lp = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+    lp.width = FrameLayout.LayoutParams.WRAP_CONTENT;
+    lp.height = FrameLayout.LayoutParams.WRAP_CONTENT;
+    lp.leftMargin = 0;
+    lp.topMargin = 0;
+    lp.rightMargin = 0;
+    lp.bottomMargin = 0;
+    lp.gravity = Gravity.LEFT | Gravity.TOP;
+    text.setLayoutParams(lp);
+  }
+
+  private void place(View view, int[] nodes, int base, int parentBase, int x, int y, int width, int height) {
+    if (width < 0) width = 0;
+    if (height < 0) height = 0;
+    FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) view.getLayoutParams();
+    boolean changed = lp == null;
+    if (lp == null) lp = new FrameLayout.LayoutParams(width, height);
+    changed = changed || lp.width != width
+        || lp.height != height
+        || lp.leftMargin != x
+        || lp.topMargin != y
+        || lp.rightMargin != 0
+        || lp.bottomMargin != 0
+        || lp.gravity != Gravity.NO_GRAVITY;
+    lp.width = width;
+    lp.height = height;
+    lp.leftMargin = x;
+    lp.topMargin = y;
+    lp.rightMargin = 0;
+    lp.bottomMargin = 0;
+    lp.gravity = Gravity.NO_GRAVITY;
+    if (changed) view.setLayoutParams(lp);
+    if (view instanceof ScrollNodeView) {
+      ScrollNodeView scroll = (ScrollNodeView) view;
+      scroll.setContentSize(
+          Math.max(width, nodes[base + O_SCROLL_CONTENT_WIDTH]),
+          Math.max(height, nodes[base + O_SCROLL_CONTENT_HEIGHT]));
+      scroll.setMomentumEnabled(nodes[base + O_MOMENTUM] != 0);
+      scroll.setNativeScroll(nodes[base + O_SCROLL_X], nodes[base + O_SCROLL_Y]);
+    }
+  }
+
+  private void applyProps(View view, int[] nodes, String[] texts, int base) {
+    int id = nodes[base + O_ID];
+    int display = nodes[base + O_DISPLAY];
+    int width = nodes[base + O_WIDTH];
+    int height = nodes[base + O_HEIGHT];
+    int opacity = nodes[base + O_OPACITY];
+    int nextVisibility = display == 1
+        || width <= 0
+        || height <= 0
+        || opacity <= 0
+        || nodes[base + O_PROJECTED] != 0
+        || isProjectedBackfaceCulled(nodes, base)
+        ? INVISIBLE
+        : VISIBLE;
+    if (view.getVisibility() != nextVisibility) view.setVisibility(nextVisibility);
+    float nextAlpha = Math.max(0f, Math.min(1f, opacity / 255f));
+    if (Math.abs(view.getAlpha() - nextAlpha) > 0.001f) view.setAlpha(nextAlpha);
+
+    applyTransform(view, nodes, base);
+    applyBackgroundIfChanged(id, view, nodes, base);
+    if (view instanceof TextNodeView) applyTextContainerPadding((TextNodeView) view, nodes, base);
+
+    if (view instanceof ParagraphNodeView) {
+      applyParagraphProps((ParagraphNodeView) view, nodes, texts, base);
+    } else if (view instanceof EditTextNodeView) {
+      applyEditTextProps((EditTextNodeView) view, nodes, texts, base);
+    } else if (view instanceof ImageNodeView) {
+      ((ImageNodeView) view).setImageId(nodes[base + O_IMAGE_ID], imageBitmaps);
+      view.setContentDescription("gea-image:" + id + ":" + nodes[base + O_IMAGE_ID]);
+    } else {
+      TextView text = textViewFor(view);
+      if (text != null) {
+        int textIndex = nodes[base + O_TEXT_INDEX];
+        String value = textIndex >= 0 && textIndex < texts.length ? texts[textIndex] : "";
+        String displayValue = transformedText(value, nodes[base + O_TEXT_TRANSFORM]);
+        setTextIfChanged(id, text, displayValue, textHash(nodes, texts, base));
+        setTextColorIfChanged(text, nodes[base + O_TEXT_COLOR]);
+        int fontSize = nodes[base + O_FONT_SIZE];
+        setTextSizePxIfChanged(text, Math.max(1, fontSize));
+        int fontFamilyIndex = nodes[base + O_FONT_FAMILY_INDEX];
+        String fontFamily = fontFamilyIndex >= 0 && fontFamilyIndex < texts.length ? texts[fontFamilyIndex] : "";
+        setTypefaceIfChanged(text, typefaceForFamily(fontFamily, nodes[base + O_FONT_WEIGHT]));
+        applyLineHeight(text, nodes[base + O_LINE_HEIGHT]);
+        boolean boundedWidth = applyTextWrapping(text, nodes, base);
+        if (view instanceof TextNodeView) {
+          TextNodeView textNode = (TextNodeView) view;
+          textNode.setBoundedTextWidth(boundedWidth);
+          textNode.setVisualTextShiftY(visualTextShiftY(fontSize, nodes[base + O_LINE_HEIGHT], displayValue));
+        }
+        setGravityIfChanged(text, textGravity(nodes, base));
+      }
+    }
+
+    applyDebugBounds(view, nodes, base);
+
+        if (!(view instanceof EditTextNodeView) && view.isClickable()) {
+            view.setOnClickListener(null);
+            view.setClickable(false);
+        }
+  }
+
+  private void applyEditTextProps(EditTextNodeView input, int[] nodes, String[] texts, int base) {
+    int id = nodes[base + O_ID];
+    String value = GeaNativeBridge.nativeAttribute(id, "value");
+    String placeholder = GeaNativeBridge.nativeAttribute(id, "placeholder");
+    input.setNodeId(id);
+    input.setNativeText(value != null ? value : "");
+    input.setHint(placeholder != null ? placeholder : "");
+    input.setContentDescription((placeholder != null && placeholder.length() > 0) ? placeholder : "input-" + id);
+    input.setTextColor(nodes[base + O_TEXT_COLOR]);
+    input.setHintTextColor(fadedColor(nodes[base + O_TEXT_COLOR], 178));
+    input.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, Math.max(1, nodes[base + O_FONT_SIZE]));
+    input.setTypeface(typefaceForFamily(fontFamily(nodes, texts, base), nodes[base + O_FONT_WEIGHT]));
+    input.setGravity(textGravity(nodes, base));
+  }
+
+  private int fadedColor(int color, int alpha) {
+    int baseAlpha = (color >>> 24) & 0xff;
+    int outAlpha = baseAlpha == 0 ? alpha : (baseAlpha * alpha + 127) / 255;
+    return (color & 0x00ffffff) | ((outAlpha & 0xff) << 24);
+  }
+
+  private void applyTransform(View view, int[] nodes, int base) {
+    int id = nodes[base + O_ID];
+    int width = Math.max(0, nodes[base + O_WIDTH]);
+    int height = Math.max(0, nodes[base + O_HEIGHT]);
+    if (nodes[base + O_PROJECTED] != 0) {
+      clearProjectedTransform(id, view);
+      resetNativeTransform(view);
+      return;
+    }
+    clearProjectedTransform(id, view);
+    if (Build.VERSION.SDK_INT >= 29 && hasProjectedDescendant(nodes, base) && hasNativeTransform(nodes, base)) {
+      resetNativeTransform(view);
+      return;
+    }
+    float pivotX = width * nodes[base + O_TRANSFORM_ORIGIN_X] / 1000f;
+    float pivotY = height * nodes[base + O_TRANSFORM_ORIGIN_Y] / 1000f;
+    float rotation = nodes[base + O_TRANSFORM_ROTATE] / 10f;
+    float rotationX = nodes[base + O_TRANSFORM_ROTATE_X] / 10f;
+    float rotationY = nodes[base + O_TRANSFORM_ROTATE_Y] / 10f;
+    float scaleX = nodes[base + O_TRANSFORM_SCALE_X] / 1000f;
+    float scaleY = nodes[base + O_TRANSFORM_SCALE_Y] / 1000f;
+    if (floatChanged(view.getPivotX(), pivotX)) view.setPivotX(pivotX);
+    if (floatChanged(view.getPivotY(), pivotY)) view.setPivotY(pivotY);
+    if (floatChanged(view.getRotation(), rotation)) view.setRotation(rotation);
+    if (floatChanged(view.getRotationX(), rotationX)) view.setRotationX(rotationX);
+    if (floatChanged(view.getRotationY(), rotationY)) view.setRotationY(rotationY);
+    if (floatChanged(view.getScaleX(), scaleX)) view.setScaleX(scaleX);
+    if (floatChanged(view.getScaleY(), scaleY)) view.setScaleY(scaleY);
+    float tx = nodes[base + O_TRANSFORM_TRANSLATE_X]
+        + width * nodes[base + O_TRANSFORM_TRANSLATE_X_PERCENT] / 1000f;
+    float ty = nodes[base + O_TRANSFORM_TRANSLATE_Y]
+        + height * nodes[base + O_TRANSFORM_TRANSLATE_Y_PERCENT] / 1000f;
+    if (floatChanged(view.getTranslationX(), tx)) view.setTranslationX(tx);
+    if (floatChanged(view.getTranslationY(), ty)) view.setTranslationY(ty);
+    if (Build.VERSION.SDK_INT >= 21) {
+      float translationZ = nodes[base + O_TRANSFORM_TRANSLATE_Z];
+      float elevation = nodes[base + O_Z_INDEX] * 32f;
+      if (floatChanged(view.getTranslationZ(), translationZ)) view.setTranslationZ(translationZ);
+      if (floatChanged(view.getElevation(), elevation)) view.setElevation(elevation);
+    }
+    int perspective = nearestAncestorPerspective(nodes, base);
+    float density = getResources().getDisplayMetrics().density;
+    float cameraDistance = Math.max(1f, perspective > 0 ? perspective : 1280) * Math.max(1f, density);
+    if (floatChanged(view.getCameraDistance(), cameraDistance)) view.setCameraDistance(cameraDistance);
+  }
+
+  private void applyProjectedTransform(int id, View view, int[] nodes, int base, int width, int height) {
+    if (width <= 0 || height <= 0) {
+      clearProjectedTransform(id, view);
+      return;
+    }
+
+    resetNativeTransform(view);
+    int projectedVisibility = prepareProjectedDestination(nodes, base, width, height);
+    if (projectedVisibility <= 0) {
+      if (view.getVisibility() != INVISIBLE) view.setVisibility(INVISIBLE);
+      return;
+    }
+
+    projectedSrc[0] = 0f;
+    projectedSrc[1] = 0f;
+    projectedSrc[2] = width;
+    projectedSrc[3] = 0f;
+    projectedSrc[4] = width;
+    projectedSrc[5] = height;
+    projectedSrc[6] = 0f;
+    projectedSrc[7] = height;
+
+    Matrix matrix = projectionMatrices.get(id);
+    if (matrix == null) {
+      matrix = new Matrix();
+      projectionMatrices.put(id, matrix);
+    } else {
+      matrix.reset();
+    }
+    if (!matrix.setPolyToPoly(projectedSrc, 0, projectedDst, 0, 4)) {
+      if (view.getVisibility() != INVISIBLE) view.setVisibility(INVISIBLE);
+      return;
+    }
+    view.setAnimationMatrix(matrix);
+    if (projectedVisibility < 1000) {
+      float projectedAlpha = view.getAlpha() * projectedVisibility / 1000f;
+      if (floatChanged(view.getAlpha(), projectedAlpha)) view.setAlpha(projectedAlpha);
+    }
+
+    if (Build.VERSION.SDK_INT >= 21) {
+      if (floatChanged(view.getElevation(), 0f)) view.setElevation(0f);
+      if (floatChanged(view.getTranslationZ(), 0f)) view.setTranslationZ(0f);
+    }
+  }
+
+  private int prepareProjectedDestination(int[] nodes, int base, int width, int height) {
+    final int stableThinAxis = 8;
+    int x0 = nodes[base + O_PROJECTED_X0];
+    int y0 = nodes[base + O_PROJECTED_Y0];
+    int x1 = nodes[base + O_PROJECTED_X1];
+    int y1 = nodes[base + O_PROJECTED_Y1];
+    int x2 = nodes[base + O_PROJECTED_X2];
+    int y2 = nodes[base + O_PROJECTED_Y2];
+    int x3 = nodes[base + O_PROJECTED_X3];
+    int y3 = nodes[base + O_PROJECTED_Y3];
+    int minX = Math.min(Math.min(x0, x1), Math.min(x2, x3));
+    int maxX = Math.max(Math.max(x0, x1), Math.max(x2, x3));
+    int minY = Math.min(Math.min(y0, y1), Math.min(y2, y3));
+    int maxY = Math.max(Math.max(y0, y1), Math.max(y2, y3));
+    int projectedWidth = maxX - minX;
+    int projectedHeight = maxY - minY;
+    int thinAxis = Math.min(projectedWidth, projectedHeight);
+    long area2 = (long) x0 * y1 - (long) x1 * y0
+        + (long) x1 * y2 - (long) x2 * y1
+        + (long) x2 * y3 - (long) x3 * y2
+        + (long) x3 * y0 - (long) x0 * y3;
+    long absArea2 = Math.abs(area2);
+    if ((projectedWidth <= 0 && projectedHeight <= 0) || (thinAxis <= 1 && absArea2 <= 1)) return 0;
+
+    float normalX = nodes[base + O_X];
+    float normalY = nodes[base + O_Y];
+    projectedDst[0] = x0 - normalX;
+    projectedDst[1] = y0 - normalY;
+    projectedDst[2] = x1 - normalX;
+    projectedDst[3] = y1 - normalY;
+    projectedDst[4] = x2 - normalX;
+    projectedDst[5] = y2 - normalY;
+    projectedDst[6] = x3 - normalX;
+    projectedDst[7] = y3 - normalY;
+
+    if (thinAxis >= stableThinAxis) return 1000;
+    if (projectedWidth <= projectedHeight) {
+      stabilizeProjectedAxis(0, minX - normalX, maxX - normalX, stableThinAxis);
+    } else {
+      stabilizeProjectedAxis(1, minY - normalY, maxY - normalY, stableThinAxis);
+    }
+    return Math.max(96, Math.min(1000, thinAxis * 1000 / stableThinAxis));
+  }
+
+  private void stabilizeProjectedAxis(int offset, float min, float max, float stableSpan) {
+    float span = max - min;
+    float center = (min + max) * 0.5f;
+    float stableMin = center - stableSpan * 0.5f;
+    float stableMax = center + stableSpan * 0.5f;
+    if (span > 0.001f) {
+      for (int i = offset; i < projectedDst.length; i += 2) {
+        projectedDst[i] = stableMin + (projectedDst[i] - min) * stableSpan / span;
+      }
+      return;
+    }
+    if (offset == 0) {
+      projectedDst[0] = stableMin;
+      projectedDst[2] = stableMax;
+      projectedDst[4] = stableMax;
+      projectedDst[6] = stableMin;
+    } else {
+      projectedDst[1] = stableMin;
+      projectedDst[3] = stableMin;
+      projectedDst[5] = stableMax;
+      projectedDst[7] = stableMax;
+    }
+  }
+
+  private void resetNativeTransform(View view) {
+    if (floatChanged(view.getPivotX(), 0f)) view.setPivotX(0f);
+    if (floatChanged(view.getPivotY(), 0f)) view.setPivotY(0f);
+    if (floatChanged(view.getRotation(), 0f)) view.setRotation(0f);
+    if (floatChanged(view.getRotationX(), 0f)) view.setRotationX(0f);
+    if (floatChanged(view.getRotationY(), 0f)) view.setRotationY(0f);
+    if (floatChanged(view.getScaleX(), 1f)) view.setScaleX(1f);
+    if (floatChanged(view.getScaleY(), 1f)) view.setScaleY(1f);
+    if (floatChanged(view.getTranslationX(), 0f)) view.setTranslationX(0f);
+    if (floatChanged(view.getTranslationY(), 0f)) view.setTranslationY(0f);
+    if (Build.VERSION.SDK_INT >= 21) {
+      if (floatChanged(view.getTranslationZ(), 0f)) view.setTranslationZ(0f);
+      if (floatChanged(view.getElevation(), 0f)) view.setElevation(0f);
+    }
+  }
+
+  private boolean hasNativeTransform(int[] nodes, int base) {
+    return nodes[base + O_TRANSFORM_ROTATE] != 0
+        || nodes[base + O_TRANSFORM_ROTATE_X] != 0
+        || nodes[base + O_TRANSFORM_ROTATE_Y] != 0
+        || nodes[base + O_TRANSFORM_TRANSLATE_X] != 0
+        || nodes[base + O_TRANSFORM_TRANSLATE_Y] != 0
+        || nodes[base + O_TRANSFORM_TRANSLATE_Z] != 0
+        || nodes[base + O_TRANSFORM_TRANSLATE_X_PERCENT] != 0
+        || nodes[base + O_TRANSFORM_TRANSLATE_Y_PERCENT] != 0
+        || nodes[base + O_TRANSFORM_SCALE_X] != 1000
+        || nodes[base + O_TRANSFORM_SCALE_Y] != 1000
+        || nodes[base + O_PERSPECTIVE] > 0;
+  }
+
+  private boolean hasProjectedDescendant(int[] nodes, int base) {
+    int id = nodes[base + O_ID];
+    Boolean cached = projectedDescendantCache.get(id);
+    if (cached != null) return cached;
+    for (int child = nodes[base + O_FIRST_CHILD]; child >= 0; ) {
+      int childBase = findBase(nodes, child);
+      if (childBase < 0) break;
+      if (nodes[childBase + O_PROJECTED] != 0 || hasProjectedDescendant(nodes, childBase)) {
+        projectedDescendantCache.put(id, true);
+        return true;
+      }
+      child = nodes[childBase + O_NEXT_SIBLING];
+    }
+    projectedDescendantCache.put(id, false);
+    return false;
+  }
+
+  private void orderProjectedChildren(FrameLayout host, int[] nodes, int base) {
+    if (host == null) return;
+    int count = 0;
+    for (int child = nodes[base + O_FIRST_CHILD]; child >= 0; ) {
+      int childBase = findBase(nodes, child);
+      if (childBase < 0) break;
+      if (nodes[childBase + O_PROJECTED] != 0 && views.get(nodes[childBase + O_ID]) != null) count++;
+      child = nodes[childBase + O_NEXT_SIBLING];
+    }
+    if (count < 2) return;
+
+    int[] bases = new int[count];
+    int index = 0;
+    for (int child = nodes[base + O_FIRST_CHILD]; child >= 0; ) {
+      int childBase = findBase(nodes, child);
+      if (childBase < 0) break;
+      if (nodes[childBase + O_PROJECTED] != 0 && views.get(nodes[childBase + O_ID]) != null) {
+        bases[index++] = childBase;
+      }
+      child = nodes[childBase + O_NEXT_SIBLING];
+    }
+
+    for (int i = 1; i < count; i++) {
+      int key = bases[i];
+      int j = i - 1;
+      while (j >= 0 && projectedChildPaintsAfter(nodes, bases[j], key)) {
+        bases[j + 1] = bases[j];
+        j--;
+      }
+      bases[j + 1] = key;
+    }
+
+    for (int i = 0; i < count; i++) {
+      View childView = views.get(nodes[bases[i] + O_ID]);
+      if (childView != null && childView.getParent() == host) childView.bringToFront();
+    }
+  }
+
+  private boolean projectedChildPaintsAfter(int[] nodes, int existingBase, int candidateBase) {
+    int existingZ = nodes[existingBase + O_Z_INDEX];
+    int candidateZ = nodes[candidateBase + O_Z_INDEX];
+    if (existingZ != candidateZ) return existingZ > candidateZ;
+    return nodes[existingBase + O_PROJECTED_DEPTH] > nodes[candidateBase + O_PROJECTED_DEPTH];
+  }
+
+  private void clearProjectedTransform(int id, View view) {
+    if (projectionMatrices.remove(id) != null && Build.VERSION.SDK_INT >= 29) {
+      view.setAnimationMatrix(null);
+    }
+  }
+
+  private boolean isProjectedBackfaceCulled(int[] nodes, int base) {
+    if (nodes[base + O_PROJECTED] == 0 || nodes[base + O_BACKFACE_HIDDEN] == 0) return false;
+    long area2 = (long) nodes[base + O_PROJECTED_X0] * nodes[base + O_PROJECTED_Y1]
+        - (long) nodes[base + O_PROJECTED_X1] * nodes[base + O_PROJECTED_Y0]
+        + (long) nodes[base + O_PROJECTED_X1] * nodes[base + O_PROJECTED_Y2]
+        - (long) nodes[base + O_PROJECTED_X2] * nodes[base + O_PROJECTED_Y1]
+        + (long) nodes[base + O_PROJECTED_X2] * nodes[base + O_PROJECTED_Y3]
+        - (long) nodes[base + O_PROJECTED_X3] * nodes[base + O_PROJECTED_Y2]
+        + (long) nodes[base + O_PROJECTED_X3] * nodes[base + O_PROJECTED_Y0]
+        - (long) nodes[base + O_PROJECTED_X0] * nodes[base + O_PROJECTED_Y3];
+    return area2 <= 0;
+  }
+
+  private int nearestAncestorPerspective(int[] nodes, int base) {
+    int parentId = nodes[base + O_PARENT];
+    while (parentId >= 0) {
+      int parentBase = findBase(nodes, parentId);
+      if (parentBase < 0) break;
+      int perspective = nodes[parentBase + O_PERSPECTIVE];
+      if (perspective > 0) return perspective;
+      parentId = nodes[parentBase + O_PARENT];
+    }
+    return 0;
+  }
+
+  private static boolean floatChanged(float current, float next) {
+    return Math.abs(current - next) > 0.001f;
+  }
+
+  private void applyBackgroundIfChanged(int id, View view, int[] nodes, int base) {
+    int borderWidth = Math.max(0, nodes[base + O_BORDER_WIDTH]);
+    int radius = Math.max(0, nodes[base + O_RADIUS]);
+    int hash = 17;
+    hash = hash * 31 + nodes[base + O_HAS_BG];
+    hash = hash * 31 + nodes[base + O_BG_COLOR];
+    hash = hash * 31 + nodes[base + O_BG_FILL];
+    hash = hash * 31 + nodes[base + O_BG_ALPHA];
+    hash = hash * 31 + nodes[base + O_BG_GRADIENT_FROM_COLOR];
+    hash = hash * 31 + nodes[base + O_BG_GRADIENT_MID_COLOR];
+    hash = hash * 31 + nodes[base + O_BG_GRADIENT_TO_COLOR];
+    hash = hash * 31 + nodes[base + O_BG_GRADIENT_MID_STOP];
+    hash = hash * 31 + nodes[base + O_BG_GRADIENT_TO_STOP];
+    hash = hash * 31 + nodes[base + O_BG_GRADIENT_HAS_MID];
+    hash = hash * 31 + nodes[base + O_BG_GRADIENT_ANGLE];
+    hash = hash * 31 + nodes[base + O_BG_GRID_AXES];
+    hash = hash * 31 + nodes[base + O_BG_GRID_COLOR];
+    hash = hash * 31 + nodes[base + O_BG_GRID_STEP_X];
+    hash = hash * 31 + nodes[base + O_BG_GRID_STEP_Y];
+    hash = hash * 31 + nodes[base + O_BG_GRID_LINE_X];
+    hash = hash * 31 + nodes[base + O_BG_GRID_LINE_Y];
+    hash = hash * 31 + radius;
+    hash = hash * 31 + borderWidth;
+    hash = hash * 31 + nodes[base + O_BORDER_COLOR];
+    Integer previous = backgroundHashes.get(id);
+    if (previous != null && previous == hash) return;
+
+    boolean hasBg = nodes[base + O_HAS_BG] != 0;
+    boolean hasGrid = nodes[base + O_BG_GRID_AXES] != 0;
+    if (!hasBg && !hasGrid && borderWidth <= 0) {
+      view.setBackground(null);
+    } else {
+      view.setBackground(new CssBackgroundDrawable(
+          hasBg,
+          nodes[base + O_BG_COLOR],
+          nodes[base + O_BG_FILL],
+          radius,
+          borderWidth,
+          nodes[base + O_BORDER_COLOR],
+          nodes[base + O_BG_GRADIENT_FROM_COLOR],
+          nodes[base + O_BG_GRADIENT_MID_COLOR],
+          nodes[base + O_BG_GRADIENT_TO_COLOR],
+          nodes[base + O_BG_GRADIENT_MID_STOP],
+          nodes[base + O_BG_GRADIENT_TO_STOP],
+          nodes[base + O_BG_GRADIENT_HAS_MID],
+          nodes[base + O_BG_GRADIENT_ANGLE],
+          nodes[base + O_BG_GRID_AXES],
+          nodes[base + O_BG_GRID_COLOR],
+          nodes[base + O_BG_GRID_STEP_X],
+          nodes[base + O_BG_GRID_STEP_Y],
+          nodes[base + O_BG_GRID_LINE_X],
+          nodes[base + O_BG_GRID_LINE_Y]));
+    }
+    backgroundHashes.put(id, hash);
+  }
+
+  private void setTextIfChanged(int id, TextView text, CharSequence value, int hash) {
+    Integer previous = textHashes.get(id);
+    if (previous != null && previous == hash) return;
+    CharSequence next = value != null ? value : "";
+    text.setText(next);
+    textHashes.put(id, hash);
+  }
+
+  private void setTextColorIfChanged(TextView text, int color) {
+    if (text.getCurrentTextColor() != color) text.setTextColor(color);
+  }
+
+  private void setTextSizePxIfChanged(TextView text, int sizePx) {
+    if (Math.abs(text.getTextSize() - sizePx) > 0.5f) {
+      text.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, sizePx);
+    }
+  }
+
+  private void setTypefaceIfChanged(TextView text, Typeface typeface) {
+    Typeface next = typeface != null ? typeface : Typeface.DEFAULT;
+    if (text.getTypeface() != next) text.setTypeface(next);
+  }
+
+  private static int normalizedFontWeight(int weight) {
+    if (weight < 1) return 400;
+    if (weight > 1000) return 1000;
+    return weight;
+  }
+
+  private void setGravityIfChanged(TextView text, int gravity) {
+    if (text.getGravity() != gravity) text.setGravity(gravity);
+  }
+
+  private void applyTextContainerPadding(TextNodeView view, int[] nodes, int base) {
+    int left = Math.max(0, nodes[base + O_PADDING_LEFT]);
+    int top = Math.max(0, nodes[base + O_PADDING_TOP]);
+    int right = Math.max(0, nodes[base + O_PADDING_RIGHT]);
+    int bottom = Math.max(0, nodes[base + O_PADDING_BOTTOM]);
+    if (view.getPaddingLeft() != left
+        || view.getPaddingTop() != top
+        || view.getPaddingRight() != right
+        || view.getPaddingBottom() != bottom) {
+      view.setPadding(left, top, right, bottom);
+    }
+  }
+
+  private void applyLineHeight(TextView text, int lineHeight) {
+    int target = Math.max(0, lineHeight);
+    if (target <= 0) {
+      text.setLineSpacing(0.0f, 1.0f);
+      return;
+    }
+    if (Build.VERSION.SDK_INT >= 28) {
+      text.setLineHeight(target);
+      return;
+    }
+    Paint.FontMetricsInt metrics = text.getPaint().getFontMetricsInt();
+    int fontHeight = Math.max(1, metrics.descent - metrics.ascent);
+    text.setLineSpacing(target - fontHeight, 1.0f);
+  }
+
+  private int visualTextShiftY(int fontSize, int lineHeight, String value) {
+    int size = Math.max(1, fontSize);
+    int targetLineHeight = Math.max(0, lineHeight);
+    int compressed = targetLineHeight > 0 ? Math.max(0, size - targetLineHeight) : 0;
+    int shift = Math.round(size * 0.38f - 5.0f + compressed / 3.0f);
+    if (shift <= 0) return 0;
+    if (size < 18) return Math.min(shift, 1);
+    if (size < 24) return Math.min(shift, 4);
+    if ("°".equals(value) && size <= 30) return shift + 5;
+    return shift;
+  }
+
+  private Typeface typefaceForFamily(String family) {
+    return typefaceForFamily(family, 400, typefaces);
+  }
+
+  private Typeface typefaceForFamily(String family, int weight) {
+    return typefaceForFamily(family, weight, typefaces);
+  }
+
+  private static Typeface typefaceForFamily(String family, Map<String, Typeface> cache) {
+    return typefaceForFamily(family, 400, cache);
+  }
+
+  private static Typeface typefaceForFamily(String family, int weight, Map<String, Typeface> cache) {
+    if (family == null || family.length() == 0) return Typeface.DEFAULT;
+    int safeWeight = normalizedFontWeight(weight);
+    String key = family + "#" + safeWeight;
+    Typeface cached = cache.get(key);
+    if (cached != null) return cached;
+    Typeface typeface = null;
+    String assetPath = GeaFontAssets.pathFor(family);
+    if (assetPath != null && appContext != null) {
+      try {
+        typeface = Typeface.createFromAsset(appContext.getAssets(), assetPath);
+      } catch (RuntimeException ignored) {
+        typeface = null;
+      }
+    }
+    if (typeface == null) typeface = Typeface.create(family, Typeface.NORMAL);
+    if (typeface == null) typeface = Typeface.DEFAULT;
+    Typeface weighted = typeface;
+    if (Build.VERSION.SDK_INT >= 28) {
+      weighted = Typeface.create(typeface, safeWeight, false);
+    } else if (safeWeight >= 600) {
+      weighted = Typeface.create(typeface, Typeface.BOLD);
+    }
+    if (weighted == null) weighted = typeface;
+    cache.put(key, weighted);
+    return weighted;
+  }
+
+  static int[] measureTextForNative(String value, int maxWidth, String family, int fontSize, int fontWeight, int lineHeight) {
+    if (value == null || value.length() == 0) return new int[] {0, 0};
+    int safeFontSize = Math.max(1, fontSize);
+    int safeLineHeight = Math.max(0, lineHeight);
+    int widthLimit = maxWidth > 0 ? Math.max(1, maxWidth) : 32767;
+    TextPaint paint = new TextPaint(Paint.ANTI_ALIAS_FLAG | Paint.SUBPIXEL_TEXT_FLAG);
+    paint.setTextSize(safeFontSize);
+    paint.setTypeface(typefaceForFamily(family, fontWeight, measureTypefaces));
+    Paint.FontMetricsInt metrics = paint.getFontMetricsInt();
+    int fontHeight = Math.max(1, metrics.descent - metrics.ascent);
+    StaticLayout layout = StaticLayout.Builder
+        .obtain(value, 0, value.length(), paint, widthLimit)
+        .setAlignment(Layout.Alignment.ALIGN_NORMAL)
+        .setIncludePad(false)
+        .setLineSpacing(safeLineHeight > 0 ? safeLineHeight - fontHeight : 0.0f, 1.0f)
+        .setBreakStrategy(Layout.BREAK_STRATEGY_SIMPLE)
+        .setHyphenationFrequency(Layout.HYPHENATION_FREQUENCY_NONE)
+        .build();
+    float measuredWidth = 0.0f;
+    for (int i = 0; i < layout.getLineCount(); i++) {
+      measuredWidth = Math.max(measuredWidth, layout.getLineWidth(i));
+    }
+    return new int[] {
+      Math.max(0, Math.min(widthLimit, (int) Math.ceil(measuredWidth) + 1)),
+      Math.max(0, safeLineHeight > 0 ? layout.getLineCount() * safeLineHeight : layout.getHeight())
+    };
+  }
+
+  private void applyParagraphProps(ParagraphNodeView paragraph, int[] nodes, String[] texts, int base) {
+    int id = nodes[base + O_ID];
+    TextView text = paragraph.text;
+    setTextColorIfChanged(text, nodes[base + O_TEXT_COLOR]);
+    setTextSizePxIfChanged(text, Math.max(1, nodes[base + O_FONT_SIZE]));
+    setTypefaceIfChanged(text, typefaceForFamily(fontFamily(nodes, texts, base), nodes[base + O_FONT_WEIGHT]));
+    applyLineHeight(text, nodes[base + O_LINE_HEIGHT]);
+    applyParagraphWrapping(text, nodes, base);
+    paragraph.setBoundedTextWidth(true);
+    setGravityIfChanged(text, paragraphGravity(nodes, base));
+    int hash = paragraphTextHash(nodes, texts, base);
+    Integer previous = textHashes.get(id);
+    if (previous == null || previous != hash) {
+      text.setText(paragraphText(nodes, texts, base));
+      textHashes.put(id, hash);
+    }
+  }
+
+  private CharSequence paragraphText(int[] nodes, String[] texts, int base) {
+    SpannableStringBuilder out = new SpannableStringBuilder();
+    appendOwnText(out, nodes, texts, base);
+    for (int child = nodes[base + O_FIRST_CHILD]; child >= 0; ) {
+      int childBase = findBase(nodes, child);
+      if (childBase < 0) break;
+      appendInlineText(out, nodes, texts, childBase);
+      child = nodes[childBase + O_NEXT_SIBLING];
+    }
+    return out;
+  }
+
+  private void appendInlineText(SpannableStringBuilder out, int[] nodes, String[] texts, int base) {
+    if (nodes[base + O_TYPE] == TYPE_TEXT) {
+      appendOwnText(out, nodes, texts, base);
+      return;
+    }
+    for (int child = nodes[base + O_FIRST_CHILD]; child >= 0; ) {
+      int childBase = findBase(nodes, child);
+      if (childBase < 0) break;
+      appendInlineText(out, nodes, texts, childBase);
+      child = nodes[childBase + O_NEXT_SIBLING];
+    }
+  }
+
+  private void appendOwnText(SpannableStringBuilder out, int[] nodes, String[] texts, int base) {
+    int textIndex = nodes[base + O_TEXT_INDEX];
+    String value = transformedText(textIndex >= 0 && textIndex < texts.length ? texts[textIndex] : "", nodes[base + O_TEXT_TRANSFORM]);
+    if (value.length() == 0) return;
+    int start = out.length();
+    out.append(value);
+    int end = out.length();
+    out.setSpan(new ForegroundColorSpan(nodes[base + O_TEXT_COLOR]), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    out.setSpan(new AbsoluteSizeSpan(Math.max(1, nodes[base + O_FONT_SIZE]), false), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+    out.setSpan(new TypefaceMetricSpan(typefaceForFamily(fontFamily(nodes, texts, base), nodes[base + O_FONT_WEIGHT])), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+  }
+
+  private int paragraphTextHash(int[] nodes, String[] texts, int base) {
+    int hash = textHash(nodes, texts, base);
+    for (int child = nodes[base + O_FIRST_CHILD]; child >= 0; ) {
+      int childBase = findBase(nodes, child);
+      if (childBase < 0) break;
+      hash = hash * 31 + inlineTextHash(nodes, texts, childBase);
+      child = nodes[childBase + O_NEXT_SIBLING];
+    }
+    return hash;
+  }
+
+  private int inlineTextHash(int[] nodes, String[] texts, int base) {
+    int hash = textHash(nodes, texts, base);
+    for (int child = nodes[base + O_FIRST_CHILD]; child >= 0; ) {
+      int childBase = findBase(nodes, child);
+      if (childBase < 0) break;
+      hash = hash * 31 + inlineTextHash(nodes, texts, childBase);
+      child = nodes[childBase + O_NEXT_SIBLING];
+    }
+    return hash;
+  }
+
+  private int textHash(int[] nodes, String[] texts, int base) {
+    int textIndex = nodes[base + O_TEXT_INDEX];
+    String value = textIndex >= 0 && textIndex < texts.length ? texts[textIndex] : "";
+    int fontFamilyIndex = nodes[base + O_FONT_FAMILY_INDEX];
+    String family = fontFamilyIndex >= 0 && fontFamilyIndex < texts.length ? texts[fontFamilyIndex] : "";
+    int hash = 17;
+    hash = hash * 31 + value.hashCode();
+    hash = hash * 31 + nodes[base + O_TEXT_COLOR];
+    hash = hash * 31 + nodes[base + O_FONT_SIZE];
+    hash = hash * 31 + nodes[base + O_FONT_WEIGHT];
+    hash = hash * 31 + nodes[base + O_TEXT_TRANSFORM];
+    hash = hash * 31 + family.hashCode();
+    return hash;
+  }
+
+  private String transformedText(String value, int transform) {
+    if (value == null || value.length() == 0 || transform == 0) return value != null ? value : "";
+    if (transform == 1) return value.toUpperCase(Locale.ROOT);
+    if (transform == 2) return value.toLowerCase(Locale.ROOT);
+    if (transform != 3) return value;
+    StringBuilder out = new StringBuilder(value.length());
+    boolean wordStart = true;
+    for (int offset = 0; offset < value.length(); ) {
+      int cp = value.codePointAt(offset);
+      if (Character.isLetter(cp)) {
+        cp = wordStart ? Character.toTitleCase(cp) : Character.toLowerCase(cp);
+        wordStart = false;
+      } else {
+        wordStart = Character.isWhitespace(cp);
+      }
+      out.appendCodePoint(cp);
+      offset += Character.charCount(cp);
+    }
+    return out.toString();
+  }
+
+  private String fontFamily(int[] nodes, String[] texts, int base) {
+    int fontFamilyIndex = nodes[base + O_FONT_FAMILY_INDEX];
+    return fontFamilyIndex >= 0 && fontFamilyIndex < texts.length ? texts[fontFamilyIndex] : "";
+  }
+
+  private int paragraphGravity(int[] nodes, int base) {
+    int align = nodes[base + O_TEXT_ALIGN];
+    int horizontal = align == 2 ? Gravity.RIGHT : align == 1 ? Gravity.CENTER_HORIZONTAL : Gravity.LEFT;
+    return horizontal | Gravity.TOP;
+  }
+
+  private int textGravity(int[] nodes, int base) {
+    int align = nodes[base + O_TEXT_ALIGN];
+    int horizontal = align == 2 ? Gravity.RIGHT : align == 1 ? Gravity.CENTER_HORIZONTAL : Gravity.LEFT;
+    return horizontal | Gravity.TOP;
+  }
+
+  private boolean applyTextWrapping(TextView text, int[] nodes, int base) {
+    boolean nowrap = nodes[base + O_WHITE_SPACE] == 1;
+    boolean singleLine = nowrap || isSingleLineTextNode(nodes, base);
+    text.setSingleLine(singleLine);
+    text.setMaxLines(singleLine ? 1 : Integer.MAX_VALUE);
+    text.setHorizontallyScrolling(singleLine);
+    text.setEllipsize(nowrap && nodes[base + O_TEXT_OVERFLOW] == 1 ? TextUtils.TruncateAt.END : null);
+    return !singleLine || (nowrap && nodes[base + O_TEXT_OVERFLOW] == 1);
+  }
+
+  private void applyParagraphWrapping(TextView text, int[] nodes, int base) {
+    boolean nowrap = nodes[base + O_WHITE_SPACE] == 1;
+    text.setSingleLine(nowrap);
+    text.setMaxLines(nowrap ? 1 : Integer.MAX_VALUE);
+    text.setHorizontallyScrolling(nowrap);
+    text.setEllipsize(nowrap && nodes[base + O_TEXT_OVERFLOW] == 1 ? TextUtils.TruncateAt.END : null);
+  }
+
+  private boolean isSingleLineTextNode(int[] nodes, int base) {
+    int lineHeight = nodes[base + O_LINE_HEIGHT] > 0
+        ? nodes[base + O_LINE_HEIGHT]
+        : Math.max(1, Math.round(nodes[base + O_FONT_SIZE] * 1.25f));
+    return nodes[base + O_HEIGHT] <= lineHeight + 2;
+  }
+
+  private static int tagHash(String tag) {
+    int hash = 0;
+    for (int i = 0; i < tag.length(); i++) hash = hash * 31 + tag.charAt(i);
+    return hash;
+  }
+
+  private TextView textViewFor(View view) {
+    if (view instanceof TextNodeView) return ((TextNodeView) view).text;
+    if (view instanceof TextView) return (TextView) view;
+    return null;
+  }
+
+  private void applyDebugBounds(View view, int[] nodes, int base) {
+    if (!DEBUG_VIEW_BOUNDS) {
+      view.setForeground(null);
+      TextView child = textViewFor(view);
+      if (child != null) child.setForeground(null);
+      if (view instanceof ScrollNodeView) ((ScrollNodeView) view).content.setForeground(null);
+      return;
+    }
+    if (view instanceof TextNodeView) {
+      view.setForeground(new DebugBoundsDrawable(0xff00e5ff, false));
+      ((TextNodeView) view).text.setForeground(new DebugBoundsDrawable(0xffffd400, true));
+      return;
+    }
+    if (view instanceof ScrollNodeView) {
+      view.setForeground(new DebugBoundsDrawable(0xff00e5ff, false));
+      ((ScrollNodeView) view).content.setForeground(new DebugBoundsDrawable(0xff66ff99, false));
+      return;
+    }
+    int color = nodes[base + O_CLICKABLE] != 0 ? 0xffff4d8d : 0xff00e5ff;
+    view.setForeground(new DebugBoundsDrawable(color, false));
+  }
+
+  private static final class CssBackgroundDrawable extends Drawable {
+    private final boolean hasBg;
+    private final int bgColor;
+    private final int bgFill;
+    private final float radius;
+    private final int borderWidth;
+    private final int borderColor;
+    private final int gradientFromColor;
+    private final int gradientMidColor;
+    private final int gradientToColor;
+    private final int gradientMidStop;
+    private final int gradientToStop;
+    private final int gradientHasMid;
+    private final int gradientAngle;
+    private final int gridAxes;
+    private final int gridColor;
+    private final int gridStepX;
+    private final int gridStepY;
+    private final int gridLineX;
+    private final int gridLineY;
+    private final Paint fill = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint stroke = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint grid = new Paint();
+    private final RectF rect = new RectF();
+
+    CssBackgroundDrawable(
+        boolean hasBg,
+        int bgColor,
+        int bgFill,
+        int radius,
+        int borderWidth,
+        int borderColor,
+        int gradientFromColor,
+        int gradientMidColor,
+        int gradientToColor,
+        int gradientMidStop,
+        int gradientToStop,
+        int gradientHasMid,
+        int gradientAngle,
+        int gridAxes,
+        int gridColor,
+        int gridStepX,
+        int gridStepY,
+        int gridLineX,
+        int gridLineY) {
+      this.hasBg = hasBg;
+      this.bgColor = bgColor;
+      this.bgFill = bgFill;
+      this.radius = Math.max(0, radius);
+      this.borderWidth = Math.max(0, borderWidth);
+      this.borderColor = borderColor;
+      this.gradientFromColor = gradientFromColor;
+      this.gradientMidColor = gradientMidColor;
+      this.gradientToColor = gradientToColor;
+      this.gradientMidStop = gradientMidStop;
+      this.gradientToStop = gradientToStop > 0 ? gradientToStop : 1000;
+      this.gradientHasMid = gradientHasMid;
+      this.gradientAngle = gradientAngle;
+      this.gridAxes = gridAxes;
+      this.gridColor = gridColor;
+      this.gridStepX = gridStepX;
+      this.gridStepY = gridStepY;
+      this.gridLineX = Math.max(0, gridLineX);
+      this.gridLineY = Math.max(0, gridLineY);
+      fill.setStyle(Paint.Style.FILL);
+      stroke.setStyle(Paint.Style.STROKE);
+      grid.setStyle(Paint.Style.FILL);
+      grid.setAntiAlias(false);
+    }
+
+    @Override
+    public void draw(Canvas canvas) {
+      Rect bounds = getBounds();
+      if (bounds.width() <= 0 || bounds.height() <= 0) return;
+      rect.set(bounds.left, bounds.top, bounds.right, bounds.bottom);
+      if (hasBg) {
+        fill.setShader(bgFill == 1 ? linearGradient(bounds) : null);
+        fill.setColor(bgFill == 1 ? Color.WHITE : bgColor);
+        drawRect(canvas, fill);
+        fill.setShader(null);
+      }
+      drawGrid(canvas, bounds);
+      if (borderWidth > 0) {
+        float inset = borderWidth * 0.5f;
+        rect.set(bounds.left + inset, bounds.top + inset, bounds.right - inset, bounds.bottom - inset);
+        stroke.setShader(null);
+        stroke.setColor(borderColor);
+        stroke.setStrokeWidth(borderWidth);
+        drawRect(canvas, stroke);
+      }
+    }
+
+    private void drawRect(Canvas canvas, Paint paint) {
+      if (radius > 0.0f) canvas.drawRoundRect(rect, radius, radius, paint);
+      else canvas.drawRect(rect, paint);
+    }
+
+    private Shader linearGradient(Rect bounds) {
+      double radians = gradientAngle * Math.PI / 1800.0;
+      float dx = (float) Math.sin(radians);
+      float dy = (float) -Math.cos(radians);
+      float left = bounds.left;
+      float top = bounds.top;
+      float right = bounds.right;
+      float bottom = bounds.bottom;
+      float p0 = left * dx + top * dy;
+      float p1 = right * dx + top * dy;
+      float p2 = right * dx + bottom * dy;
+      float p3 = left * dx + bottom * dy;
+      float min = Math.min(Math.min(p0, p1), Math.min(p2, p3));
+      float max = Math.max(Math.max(p0, p1), Math.max(p2, p3));
+      float span = Math.max(0.001f, max - min) * Math.max(1.0f, gradientToStop / 1000f);
+      float cx = (left + right) * 0.5f;
+      float cy = (top + bottom) * 0.5f;
+      float centerProjection = cx * dx + cy * dy;
+      float sx = cx + dx * (min - centerProjection);
+      float sy = cy + dy * (min - centerProjection);
+      float ex = sx + dx * span;
+      float ey = sy + dy * span;
+      if (gradientHasMid != 0) {
+        float mid = Math.max(0.0f, Math.min(1.0f, gradientMidStop / (float) Math.max(1, gradientToStop)));
+        return new LinearGradient(
+            sx, sy, ex, ey,
+            new int[] {gradientFromColor, gradientMidColor, gradientToColor},
+            new float[] {0.0f, mid, 1.0f},
+            Shader.TileMode.CLAMP);
+      }
+      return new LinearGradient(
+          sx, sy, ex, ey,
+          new int[] {gradientFromColor, gradientToColor},
+          new float[] {0.0f, 1.0f},
+          Shader.TileMode.CLAMP);
+    }
+
+    private void drawGrid(Canvas canvas, Rect bounds) {
+      if (gridAxes == 0) return;
+      grid.setColor(gridColor);
+      if ((gridAxes & 1) != 0 && gridLineX > 0) {
+        int step = gridStepX > 0 ? gridStepX : gridLineX;
+        for (int x = bounds.left; x < bounds.right; x += step) {
+          canvas.drawRect(x, bounds.top, Math.min(bounds.right, x + gridLineX), bounds.bottom, grid);
+        }
+      }
+      if ((gridAxes & 2) != 0 && gridLineY > 0) {
+        int step = gridStepY > 0 ? gridStepY : gridLineY;
+        for (int y = bounds.top; y < bounds.bottom; y += step) {
+          canvas.drawRect(bounds.left, y, bounds.right, Math.min(bounds.bottom, y + gridLineY), grid);
+        }
+      }
+    }
+
+    @Override
+    public void setAlpha(int alpha) {
+      fill.setAlpha(alpha);
+      stroke.setAlpha(alpha);
+      grid.setAlpha(alpha);
+    }
+
+    @Override
+    public void setColorFilter(ColorFilter colorFilter) {
+      fill.setColorFilter(colorFilter);
+      stroke.setColorFilter(colorFilter);
+      grid.setColorFilter(colorFilter);
+    }
+
+    @Override
+    public int getOpacity() {
+      return PixelFormat.TRANSLUCENT;
+    }
+  }
+
+  private static final class ImageNodeView extends ImageView {
+    private int currentImageId = Integer.MIN_VALUE;
+
+    ImageNodeView(Context context) {
+      super(context);
+      setScaleType(ImageView.ScaleType.FIT_XY);
+      setAdjustViewBounds(false);
+      setClipToOutline(false);
+    }
+
+    void setImageId(int imageId, Map<Integer, Bitmap> cache) {
+      if (imageId < 0) {
+        if (currentImageId != imageId || getDrawable() != null) setImageDrawable(null);
+        currentImageId = imageId;
+        return;
+      }
+      Bitmap bitmap = cache.get(imageId);
+      if (bitmap == null) {
+        int[] data = GeaNativeBridge.nativeImagePixels(imageId);
+        if (data == null || data.length < 3 || data[0] <= 0 || data[1] <= 0) {
+          currentImageId = Integer.MIN_VALUE;
+          setImageDrawable(null);
+          return;
+        }
+        int width = data[0];
+        int height = data[1];
+        long expectedLength = (long) width * (long) height + 2L;
+        if (data.length < expectedLength) {
+          currentImageId = Integer.MIN_VALUE;
+          setImageDrawable(null);
+          return;
+        }
+        try {
+          bitmap = Bitmap.createBitmap(data, 2, width, width, height, Bitmap.Config.ARGB_8888);
+        } catch (IllegalArgumentException ignored) {
+          currentImageId = Integer.MIN_VALUE;
+          setImageDrawable(null);
+          return;
+        }
+        cache.put(imageId, bitmap);
+      }
+      if (currentImageId == imageId && getDrawable() != null) return;
+      currentImageId = imageId;
+      setImageBitmap(bitmap);
+    }
+  }
+
+  private static final class ProjectedOverlayView extends View {
+    private final GeaNativeView owner;
+    private final Matrix matrix = new Matrix();
+    private final Path clipPath = new Path();
+    private final RectF layerBounds = new RectF();
+    private final float[] src = new float[8];
+    private final float[] dst = new float[8];
+    private final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+    private int[] nodes = new int[0];
+    private String[] texts = new String[0];
+    private int[] bases = new int[0];
+    private int originX;
+    private int originY;
+
+    ProjectedOverlayView(GeaNativeView owner, Context context) {
+      super(context);
+      this.owner = owner;
+      setWillNotDraw(false);
+      setClickable(false);
+      setFocusable(false);
+      setVisibility(INVISIBLE);
+    }
+
+    void setFrame(int[] nodes, String[] texts, int originX, int originY) {
+      this.nodes = nodes != null ? nodes : new int[0];
+      this.texts = texts != null ? texts : new String[0];
+      this.originX = originX;
+      this.originY = originY;
+      boolean hasProjected = false;
+      int count = this.nodes.length / FIELDS;
+      for (int i = 0; i < count; i++) {
+        int base = i * FIELDS;
+        if (isProjectedDrawable(base)) {
+          hasProjected = true;
+          break;
+        }
+      }
+      setVisibility(hasProjected ? VISIBLE : INVISIBLE);
+      invalidate();
+    }
+
+    @Override
+    protected void onDraw(Canvas canvas) {
+      super.onDraw(canvas);
+      int count = collectProjectedBases();
+      for (int i = 0; i < count; i++) drawProjectedNode(canvas, bases[i]);
+    }
+
+    private int collectProjectedBases() {
+      int count = 0;
+      int nodeCount = nodes.length / FIELDS;
+      if (bases.length < nodeCount) bases = new int[nodeCount];
+      for (int i = 0; i < nodeCount; i++) {
+        int base = i * FIELDS;
+        if (isProjectedDrawable(base)) bases[count++] = base;
+      }
+      for (int i = 1; i < count; i++) {
+        int key = bases[i];
+        int j = i - 1;
+        while (j >= 0 && projectedPaintsAfter(bases[j], key)) {
+          bases[j + 1] = bases[j];
+          j--;
+        }
+        bases[j + 1] = key;
+      }
+      return count;
+    }
+
+    private boolean projectedPaintsAfter(int existingBase, int candidateBase) {
+      int existingZ = effectiveZ(existingBase);
+      int candidateZ = effectiveZ(candidateBase);
+      if (existingZ != candidateZ) return existingZ > candidateZ;
+      return owner.projectedChildPaintsAfter(nodes, existingBase, candidateBase);
+    }
+
+    private int effectiveZ(int base) {
+      int z = 0;
+      for (int current = base; current >= 0; ) {
+        z += nodes[current + O_Z_INDEX];
+        int parentId = nodes[current + O_PARENT];
+        current = parentId >= 0 ? owner.findBase(nodes, parentId) : -1;
+      }
+      return z;
+    }
+
+    private boolean isProjectedDrawable(int base) {
+      return nodes[base + O_PROJECTED] != 0
+          && nodes[base + O_DISPLAY] != DISPLAY_NONE
+          && nodes[base + O_WIDTH] > 0
+          && nodes[base + O_HEIGHT] > 0
+          && nodes[base + O_OPACITY] > 0
+          && !owner.isProjectedBackfaceCulled(nodes, base);
+    }
+
+    private void drawProjectedNode(Canvas canvas, int base) {
+      int width = nodes[base + O_WIDTH];
+      int height = nodes[base + O_HEIGHT];
+      if (!prepareDestination(base)) return;
+      src[0] = 0f;
+      src[1] = 0f;
+      src[2] = width;
+      src[3] = 0f;
+      src[4] = width;
+      src[5] = height;
+      src[6] = 0f;
+      src[7] = height;
+      matrix.reset();
+      if (!matrix.setPolyToPoly(src, 0, dst, 0, 4)) return;
+
+      setLayerBounds();
+      int opacity = Math.max(0, Math.min(255, nodes[base + O_OPACITY]));
+      int save = opacity < 255 ? canvas.saveLayerAlpha(layerBounds, opacity) : canvas.save();
+      clipPath.reset();
+      clipPath.moveTo(dst[0], dst[1]);
+      clipPath.lineTo(dst[2], dst[3]);
+      clipPath.lineTo(dst[4], dst[5]);
+      clipPath.lineTo(dst[6], dst[7]);
+      clipPath.close();
+      canvas.clipPath(clipPath);
+      canvas.concat(matrix);
+      drawBackground(canvas, base, width, height);
+      drawOwnText(canvas, base, nodes[base + O_X], nodes[base + O_Y]);
+      drawTextDescendants(canvas, base, nodes[base + O_X], nodes[base + O_Y]);
+      canvas.restoreToCount(save);
+    }
+
+    private boolean prepareDestination(int base) {
+      final float stableThinAxis = 8f;
+      float x0 = nodes[base + O_PROJECTED_X0];
+      float y0 = nodes[base + O_PROJECTED_Y0];
+      float x1 = nodes[base + O_PROJECTED_X1];
+      float y1 = nodes[base + O_PROJECTED_Y1];
+      float x2 = nodes[base + O_PROJECTED_X2];
+      float y2 = nodes[base + O_PROJECTED_Y2];
+      float x3 = nodes[base + O_PROJECTED_X3];
+      float y3 = nodes[base + O_PROJECTED_Y3];
+      float minX = Math.min(Math.min(x0, x1), Math.min(x2, x3));
+      float maxX = Math.max(Math.max(x0, x1), Math.max(x2, x3));
+      float minY = Math.min(Math.min(y0, y1), Math.min(y2, y3));
+      float maxY = Math.max(Math.max(y0, y1), Math.max(y2, y3));
+      float projectedWidth = maxX - minX;
+      float projectedHeight = maxY - minY;
+      float thinAxis = Math.min(projectedWidth, projectedHeight);
+      float area2 = x0 * y1 - x1 * y0
+          + x1 * y2 - x2 * y1
+          + x2 * y3 - x3 * y2
+          + x3 * y0 - x0 * y3;
+      if ((projectedWidth <= 0f && projectedHeight <= 0f) || (thinAxis <= 1f && Math.abs(area2) <= 1f)) {
+        return false;
+      }
+      dst[0] = x0 - originX;
+      dst[1] = y0 - originY;
+      dst[2] = x1 - originX;
+      dst[3] = y1 - originY;
+      dst[4] = x2 - originX;
+      dst[5] = y2 - originY;
+      dst[6] = x3 - originX;
+      dst[7] = y3 - originY;
+      if (thinAxis >= stableThinAxis) return true;
+      if (projectedWidth <= projectedHeight) {
+        stabilizeAxis(0, minX - originX, maxX - originX, stableThinAxis);
+      } else {
+        stabilizeAxis(1, minY - originY, maxY - originY, stableThinAxis);
+      }
+      return true;
+    }
+
+    private void stabilizeAxis(int offset, float min, float max, float stableSpan) {
+      float span = max - min;
+      float center = (min + max) * 0.5f;
+      float stableMin = center - stableSpan * 0.5f;
+      float stableMax = center + stableSpan * 0.5f;
+      if (span > 0.001f) {
+        for (int i = offset; i < dst.length; i += 2) {
+          dst[i] = stableMin + (dst[i] - min) * stableSpan / span;
+        }
+        return;
+      }
+      if (offset == 0) {
+        dst[0] = stableMin;
+        dst[2] = stableMax;
+        dst[4] = stableMax;
+        dst[6] = stableMin;
+      } else {
+        dst[1] = stableMin;
+        dst[3] = stableMin;
+        dst[5] = stableMax;
+        dst[7] = stableMax;
+      }
+    }
+
+    private void setLayerBounds() {
+      float minX = Math.min(Math.min(dst[0], dst[2]), Math.min(dst[4], dst[6]));
+      float maxX = Math.max(Math.max(dst[0], dst[2]), Math.max(dst[4], dst[6]));
+      float minY = Math.min(Math.min(dst[1], dst[3]), Math.min(dst[5], dst[7]));
+      float maxY = Math.max(Math.max(dst[1], dst[3]), Math.max(dst[5], dst[7]));
+      layerBounds.set(minX - 2f, minY - 2f, maxX + 2f, maxY + 2f);
+    }
+
+    private void drawBackground(Canvas canvas, int base, int width, int height) {
+      boolean hasBg = nodes[base + O_HAS_BG] != 0;
+      boolean hasGrid = nodes[base + O_BG_GRID_AXES] != 0;
+      int borderWidth = Math.max(0, nodes[base + O_BORDER_WIDTH]);
+      if (!hasBg && !hasGrid && borderWidth <= 0) return;
+      CssBackgroundDrawable drawable = new CssBackgroundDrawable(
+          hasBg,
+          nodes[base + O_BG_COLOR],
+          nodes[base + O_BG_FILL],
+          Math.max(0, nodes[base + O_RADIUS]),
+          borderWidth,
+          nodes[base + O_BORDER_COLOR],
+          nodes[base + O_BG_GRADIENT_FROM_COLOR],
+          nodes[base + O_BG_GRADIENT_MID_COLOR],
+          nodes[base + O_BG_GRADIENT_TO_COLOR],
+          nodes[base + O_BG_GRADIENT_MID_STOP],
+          nodes[base + O_BG_GRADIENT_TO_STOP],
+          nodes[base + O_BG_GRADIENT_HAS_MID],
+          nodes[base + O_BG_GRADIENT_ANGLE],
+          nodes[base + O_BG_GRID_AXES],
+          nodes[base + O_BG_GRID_COLOR],
+          nodes[base + O_BG_GRID_STEP_X],
+          nodes[base + O_BG_GRID_STEP_Y],
+          nodes[base + O_BG_GRID_LINE_X],
+          nodes[base + O_BG_GRID_LINE_Y]);
+      drawable.setBounds(0, 0, width, height);
+      drawable.draw(canvas);
+    }
+
+    private void drawTextDescendants(Canvas canvas, int base, int originX, int originY) {
+      for (int child = nodes[base + O_FIRST_CHILD]; child >= 0; ) {
+        int childBase = owner.findBase(nodes, child);
+        if (childBase < 0) break;
+        if (nodes[childBase + O_PROJECTED] == 0 && nodes[childBase + O_DISPLAY] != DISPLAY_NONE) {
+          drawOwnText(canvas, childBase, originX, originY);
+          drawTextDescendants(canvas, childBase, originX, originY);
+        }
+        child = nodes[childBase + O_NEXT_SIBLING];
+      }
+    }
+
+    private void drawOwnText(Canvas canvas, int base, int originX, int originY) {
+      if (nodes[base + O_TYPE] != TYPE_TEXT) return;
+      int textIndex = nodes[base + O_TEXT_INDEX];
+      if (textIndex < 0 || textIndex >= texts.length) return;
+      String value = texts[textIndex];
+      if (value == null || value.length() == 0) return;
+      int width = Math.max(1, nodes[base + O_WIDTH]);
+      int height = Math.max(1, nodes[base + O_HEIGHT]);
+      int padLeft = Math.max(0, nodes[base + O_PADDING_LEFT]);
+      int padTop = Math.max(0, nodes[base + O_PADDING_TOP]);
+      int padRight = Math.max(0, nodes[base + O_PADDING_RIGHT]);
+      int padBottom = Math.max(0, nodes[base + O_PADDING_BOTTOM]);
+      int contentWidth = Math.max(1, width - padLeft - padRight);
+      int contentHeight = Math.max(1, height - padTop - padBottom);
+      float x = nodes[base + O_X] - originX + padLeft + contentWidth * 0.5f;
+      float y = nodes[base + O_Y] - originY + padTop + contentHeight * 0.5f;
+      textPaint.setColor(nodes[base + O_TEXT_COLOR]);
+      textPaint.setTextSize(Math.max(1, nodes[base + O_FONT_SIZE]));
+      textPaint.setTypeface(owner.typefaceForFamily(owner.fontFamily(nodes, texts, base), nodes[base + O_FONT_WEIGHT]));
+      textPaint.setTextAlign(Paint.Align.CENTER);
+      Paint.FontMetrics metrics = textPaint.getFontMetrics();
+      canvas.drawText(value, x, y - (metrics.ascent + metrics.descent) * 0.5f, textPaint);
+    }
+  }
+
+  private static final class SurfaceLayer extends SurfaceView implements SurfaceHolder.Callback {
+    private final GeaNativeView owner;
+    volatile boolean surfaceReady;
+
+    SurfaceLayer(GeaNativeView owner, Context context) {
+      super(context);
+      this.owner = owner;
+      // Opaque layer: lets SurfaceFlinger skip alpha blending (or promote the
+      // layer to an HWC overlay). With a translucent format SF misses vsyncs
+      // GPU-compositing this watch's layer stack, capping the app below 60.
+      getHolder().setFormat(PixelFormat.OPAQUE);
+      getHolder().addCallback(this);
+    }
+
+    @Override
+    public void surfaceCreated(SurfaceHolder holder) {}
+
+    @Override
+    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+      GeaNativeBridge.nativeSetSurface(holder.getSurface());
+      surfaceReady = true;
+      owner.requestFrame();
+    }
+
+    @Override
+    public void surfaceDestroyed(SurfaceHolder holder) {
+      surfaceReady = false;
+      GeaNativeBridge.nativeSetSurface(null);
+    }
+  }
+
+  private static final class CanvasLayer extends View {
+    private final GeaNativeView owner;
+    private Bitmap bitmap;
+    private int[] pixels = new int[0];
+    private final Paint paint = new Paint();
+    private final Rect source = new Rect();
+    private final Rect target = new Rect();
+
+    CanvasLayer(GeaNativeView owner, Context context) {
+      super(context);
+      this.owner = owner;
+      setWillNotDraw(false);
+      paint.setFilterBitmap(false);
+      paint.setDither(false);
+    }
+
+    void clearBitmap() {
+      if (bitmap == null) return;
+      bitmap = null;
+      invalidate();
+    }
+
+    void syncFrame() {
+      int requiredLength = GeaNativeBridge.nativeCanvasPixels(pixels);
+      if (requiredLength <= 0) return;
+      if (pixels.length < requiredLength) {
+        pixels = new int[requiredLength];
+        requiredLength = GeaNativeBridge.nativeCanvasPixels(pixels);
+        if (requiredLength <= 0) return;
+      }
+      int width = pixels[0];
+      int height = pixels[1];
+      if (width <= 0 || height <= 0) return;
+      if (bitmap == null || bitmap.getWidth() != width || bitmap.getHeight() != height) {
+        bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+      }
+      bitmap.setPixels(pixels, 2, width, 0, 0, width, height);
+      invalidate();
+    }
+
+    @Override
+    protected void onDraw(Canvas canvas) {
+      super.onDraw(canvas);
+      if (owner.drawNativeFrame(canvas)) return;
+      if (bitmap == null) return;
+      if (bitmap.getWidth() == getWidth() && bitmap.getHeight() == getHeight()) {
+        canvas.drawBitmap(bitmap, 0, 0, paint);
+        return;
+      }
+      source.set(0, 0, bitmap.getWidth(), bitmap.getHeight());
+      target.set(0, 0, getWidth(), getHeight());
+      canvas.drawBitmap(bitmap, source, target, paint);
+    }
+  }
+
+  private static final class ScrollNodeView extends ScrollView {
+    final FrameLayout content;
+    int nodeId = -1;
+    private int contentWidth = 1;
+    private int contentHeight = 1;
+    private boolean momentumEnabled;
+
+    ScrollNodeView(Context context) {
+      super(context);
+      setFillViewport(false);
+      setClipChildren(true);
+      setClipToPadding(true);
+      setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+      setVerticalScrollBarEnabled(false);
+      setHorizontalScrollBarEnabled(false);
+      content = new FrameLayout(context);
+      content.setClipChildren(false);
+      content.setClipToPadding(false);
+      addView(content, new ScrollView.LayoutParams(ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT));
+    }
+
+    void setContentSize(int width, int height) {
+      ScrollView.LayoutParams lp = (ScrollView.LayoutParams) content.getLayoutParams();
+      int nextWidth = Math.max(1, width);
+      int nextHeight = Math.max(1, height);
+      contentWidth = nextWidth;
+      contentHeight = nextHeight;
+      if (lp.width == nextWidth && lp.height == nextHeight) return;
+      lp.width = nextWidth;
+      lp.height = nextHeight;
+      content.setLayoutParams(lp);
+    }
+
+    void setNativeScroll(int scrollX, int scrollY) {
+      int nextX = Math.max(0, Math.min(scrollX, maxScrollX()));
+      int nextY = Math.max(0, Math.min(scrollY, maxScrollY()));
+      if (getScrollX() != nextX || getScrollY() != nextY) scrollTo(nextX, nextY);
+    }
+
+    void setMomentumEnabled(boolean enabled) {
+      momentumEnabled = enabled;
+    }
+
+    boolean hasMomentum() {
+      return momentumEnabled;
+    }
+
+    int maxScrollX() {
+      return Math.max(0, contentWidth - getWidth());
+    }
+
+    int maxScrollY() {
+      return Math.max(0, contentHeight - getHeight());
+    }
+
+    boolean canScrollX() {
+      return contentWidth > getWidth();
+    }
+
+    boolean canScrollY() {
+      return contentHeight > getHeight();
+    }
+  }
+
+  private static final class ParagraphNodeView extends TextNodeView {
+    ParagraphNodeView(Context context) {
+      super(context);
+    }
+  }
+
+  private static final class TypefaceMetricSpan extends MetricAffectingSpan {
+    private final Typeface typeface;
+
+    TypefaceMetricSpan(Typeface typeface) {
+      this.typeface = typeface;
+    }
+
+    @Override
+    public void updateMeasureState(TextPaint paint) {
+      paint.setTypeface(typeface);
+    }
+
+    @Override
+    public void updateDrawState(TextPaint paint) {
+      paint.setTypeface(typeface);
+    }
+  }
+
+  private static class TextNodeView extends FrameLayout {
+    final TextView text;
+    private final Rect parentBounds = new Rect();
+    private final Rect childBounds = new Rect();
+    private boolean boundedTextWidth = true;
+    private int visualTextShiftY = 0;
+
+    TextNodeView(Context context) {
+      super(context);
+      setClipChildren(false);
+      setClipToPadding(false);
+      text = new TextView(context);
+      text.setClickable(false);
+      text.setFocusable(false);
+      addView(text, new FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.LEFT | Gravity.TOP));
+    }
+
+    void setBoundedTextWidth(boolean bounded) {
+      if (boundedTextWidth == bounded) return;
+      boundedTextWidth = bounded;
+      requestLayout();
+    }
+
+    void setVisualTextShiftY(int shiftY) {
+      int next = Math.max(0, shiftY);
+      if (visualTextShiftY == next) return;
+      visualTextShiftY = next;
+      requestLayout();
+    }
+
+    @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+      int childWidthSpec = boundedTextWidth
+          ? childMeasureSpec(widthMeasureSpec, getPaddingLeft() + getPaddingRight())
+          : MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
+      int childHeightSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
+      text.measure(childWidthSpec, childHeightSpec);
+      int desiredWidth = getPaddingLeft() + text.getMeasuredWidth() + getPaddingRight();
+      int desiredHeight = getPaddingTop() + text.getMeasuredHeight() + getPaddingBottom();
+      setMeasuredDimension(resolveSize(desiredWidth, widthMeasureSpec), resolveSize(desiredHeight, heightMeasureSpec));
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+      FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) text.getLayoutParams();
+      parentBounds.set(getPaddingLeft(), getPaddingTop(), right - left - getPaddingRight(), bottom - top - getPaddingBottom());
+      Gravity.apply(lp.gravity, text.getMeasuredWidth(), text.getMeasuredHeight(), parentBounds, childBounds);
+      text.layout(childBounds.left, childBounds.top - visualTextShiftY, childBounds.right, childBounds.bottom - visualTextShiftY);
+    }
+
+    private static int childMeasureSpec(int parentSpec, int padding) {
+      int mode = MeasureSpec.getMode(parentSpec);
+      int size = Math.max(0, MeasureSpec.getSize(parentSpec) - padding);
+      if (mode == MeasureSpec.EXACTLY) return MeasureSpec.makeMeasureSpec(size, MeasureSpec.EXACTLY);
+      if (mode == MeasureSpec.AT_MOST) return MeasureSpec.makeMeasureSpec(size, MeasureSpec.AT_MOST);
+      return MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED);
+    }
+  }
+
+  private static final class EditTextNodeView extends EditText {
+    private final GeaNativeView owner;
+    private int nodeId = -1;
+    private boolean syncingText;
+
+    EditTextNodeView(GeaNativeView owner, Context context) {
+      super(context);
+      this.owner = owner;
+      setSingleLine(true);
+      setMinWidth(0);
+      setMinimumWidth(0);
+      setMinHeight(0);
+      setMinimumHeight(0);
+      setPadding(0, 0, 0, 0);
+      setIncludeFontPadding(false);
+      setBackground(null);
+      setSelectAllOnFocus(false);
+      setFocusable(true);
+      setFocusableInTouchMode(true);
+      setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_WORDS);
+      setImeOptions(EditorInfo.IME_ACTION_SEARCH | EditorInfo.IME_FLAG_NO_EXTRACT_UI);
+      setHorizontallyScrolling(true);
+      setGravity(Gravity.CENTER_VERTICAL | Gravity.LEFT);
+
+      addTextChangedListener(new TextWatcher() {
+        @Override
+        public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+        @Override
+        public void onTextChanged(CharSequence s, int start, int before, int count) {}
+
+        @Override
+        public void afterTextChanged(Editable editable) {
+          if (syncingText || nodeId < 0) return;
+          GeaNativeBridge.nativeInput(nodeId, editable != null ? editable.toString() : "");
+          owner.requestFrame();
+        }
+      });
+
+      setOnFocusChangeListener(new View.OnFocusChangeListener() {
+        @Override
+        public void onFocusChange(View v, boolean hasFocus) {
+          if (nodeId >= 0) GeaNativeBridge.nativeFocusInput(nodeId, hasFocus);
+          if (hasFocus) showKeyboard();
+          owner.requestFrame();
+        }
+      });
+
+      setOnEditorActionListener(new TextView.OnEditorActionListener() {
+        @Override
+        public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
+          boolean actionSearch = actionId == EditorInfo.IME_ACTION_SEARCH || actionId == EditorInfo.IME_ACTION_DONE;
+          boolean enterUp = event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER && event.getAction() == KeyEvent.ACTION_UP;
+          if (!actionSearch && !enterUp) return false;
+          submitEditing();
+          return true;
+        }
+      });
+
+      setOnKeyListener(new View.OnKeyListener() {
+        @Override
+        public boolean onKey(View v, int keyCode, KeyEvent event) {
+          if (keyCode != KeyEvent.KEYCODE_ENTER) return false;
+          if (event == null || event.getAction() == KeyEvent.ACTION_UP) submitEditing();
+          return true;
+        }
+      });
+    }
+
+    void setNodeId(int nodeId) {
+      this.nodeId = nodeId;
+    }
+
+    void setNativeText(String value) {
+      if (value == null) value = "";
+      CharSequence current = getText();
+      if (current != null && value.contentEquals(current)) return;
+      syncingText = true;
+      setText(value);
+      setSelection(value.length());
+      syncingText = false;
+    }
+
+    private void showKeyboard() {
+      post(new Runnable() {
+        @Override
+        public void run() {
+          InputMethodManager imm = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+          if (imm != null) imm.showSoftInput(EditTextNodeView.this, InputMethodManager.SHOW_IMPLICIT);
+        }
+      });
+    }
+
+    private void submitEditing() {
+      if (nodeId >= 0) GeaNativeBridge.nativeKeyDown(nodeId, 13);
+      owner.requestFrame();
+    }
+  }
+
+  private static final class DebugBoundsDrawable extends Drawable {
+    private final Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint center = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final boolean text;
+
+    DebugBoundsDrawable(int color, boolean text) {
+      this.text = text;
+      border.setStyle(Paint.Style.STROKE);
+      border.setStrokeWidth(text ? 3.0f : 2.0f);
+      border.setColor(color);
+      center.setStyle(Paint.Style.STROKE);
+      center.setStrokeWidth(1.0f);
+      center.setColor((color & 0x00ffffff) | 0x88000000);
+    }
+
+    @Override
+    public void draw(Canvas canvas) {
+      Rect bounds = getBounds();
+      float inset = border.getStrokeWidth() * 0.5f;
+      canvas.drawRect(bounds.left + inset, bounds.top + inset, bounds.right - inset, bounds.bottom - inset, border);
+      if (!text) return;
+      float cx = bounds.exactCenterX();
+      float cy = bounds.exactCenterY();
+      canvas.drawLine(bounds.left, cy, bounds.right, cy, center);
+      canvas.drawLine(cx, bounds.top, cx, bounds.bottom, center);
+    }
+
+    @Override
+    public void setAlpha(int alpha) {
+      border.setAlpha(alpha);
+      center.setAlpha(Math.max(40, alpha / 2));
+    }
+
+    @Override
+    public void setColorFilter(ColorFilter colorFilter) {
+      border.setColorFilter(colorFilter);
+      center.setColorFilter(colorFilter);
+    }
+
+    @Override
+    public int getOpacity() {
+      return PixelFormat.TRANSLUCENT;
+    }
+  }
+}

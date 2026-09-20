@@ -1,0 +1,31 @@
+{
+  "name": "@geastack/android",
+  "version": "0.1.0",
+  "description": "Native Android build target for GeaStack apps: builds web-rendered apps into a small WebView APK without Gradle.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/geastack/android.git"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "targets",
+    "!targets/**/dist/**",
+    "!targets/**/build/**",
+    "!targets/**/test/**",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "for f in $(git ls-files | grep -E '(^|/)(test[-_][^/]*|[^/]*\\.test)\\.mjs$'); do echo \"==> $f\"; node \"$f\" || exit 1; done"
+  }
+}

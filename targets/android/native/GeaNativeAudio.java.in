@@ -1,0 +1,109 @@
+package @PACKAGE@;
+
+import android.media.AudioAttributes;
+import android.media.AudioFormat;
+import android.media.AudioTrack;
+import android.os.SystemClock;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
+
+final class GeaNativeAudio {
+  private static final int SAMPLE_RATE = 16000;
+  private static final int CHANNELS = 2;
+  private static final int MAX_DURATION_MS = 2500;
+  private static final ExecutorService AUDIO_EXECUTOR = Executors.newCachedThreadPool(new ThreadFactory() {
+    private final AtomicInteger nextId = new AtomicInteger(1);
+
+    @Override
+    public Thread newThread(Runnable runnable) {
+      Thread thread = new Thread(runnable, "gea-audio-" + nextId.getAndIncrement());
+      thread.setDaemon(true);
+      return thread;
+    }
+  });
+
+  private GeaNativeAudio() {}
+
+  static void playTone(int type, double frequencyHz, int durationMs, int delayMs, int volumePercent) {
+    if (Double.isNaN(frequencyHz) || Double.isInfinite(frequencyHz) || frequencyHz <= 0.0 || durationMs <= 0) return;
+    final int safeType = Math.max(0, Math.min(3, type));
+    final double safeFrequency = Math.max(40.0, Math.min(4000.0, frequencyHz));
+    final int safeDuration = Math.max(10, Math.min(MAX_DURATION_MS, durationMs));
+    final int safeDelay = Math.max(0, delayMs);
+    final float volume = Math.max(0.0f, Math.min(1.0f, volumePercent / 100.0f));
+
+    AUDIO_EXECUTOR.execute(new Runnable() {
+      @Override
+      public void run() {
+        if (safeDelay > 0) SystemClock.sleep(safeDelay);
+        short[] pcm = buildTone(safeType, safeFrequency, safeDuration, volume);
+        AudioTrack track = null;
+        try {
+          track = new AudioTrack.Builder()
+              .setAudioAttributes(new AudioAttributes.Builder()
+                  .setUsage(AudioAttributes.USAGE_GAME)
+                  .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                  .build())
+              .setAudioFormat(new AudioFormat.Builder()
+                  .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                  .setSampleRate(SAMPLE_RATE)
+                  .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
+                  .build())
+              .setTransferMode(AudioTrack.MODE_STATIC)
+              .setBufferSizeInBytes(pcm.length * 2)
+              .build();
+          track.write(pcm, 0, pcm.length);
+          track.setVolume(volume);
+          track.play();
+          SystemClock.sleep(safeDuration + 80);
+        } catch (RuntimeException ignored) {
+          // Audio is best-effort for native app targets.
+        } finally {
+          if (track != null) {
+            try {
+              track.stop();
+            } catch (IllegalStateException ignored) {
+            }
+            track.release();
+          }
+        }
+      }
+    });
+  }
+
+  private static short[] buildTone(int type, double frequencyHz, int durationMs, float volume) {
+    int frames = Math.max(1, (SAMPLE_RATE * durationMs) / 1000);
+    short[] pcm = new short[frames * CHANNELS];
+    double phase = 0.0;
+    double step = frequencyHz / SAMPLE_RATE;
+    int amplitude = Math.round(9000.0f * volume);
+    for (int i = 0; i < frames; i++) {
+      double wave = waveform(type, phase);
+      int level = envelope(i, frames - i);
+      short sample = (short) Math.max(-32768, Math.min(32767, Math.round(wave * amplitude * level / 256.0)));
+      pcm[i * 2] = sample;
+      pcm[i * 2 + 1] = sample;
+      phase += step;
+      phase -= Math.floor(phase);
+    }
+    return pcm;
+  }
+
+  private static double waveform(int type, double phase) {
+    if (type == 1) return phase < 0.5 ? -1.0 : 1.0;
+    if (type == 2) return phase * 2.0 - 1.0;
+    if (type == 3) return phase < 0.5 ? (phase * 4.0 - 1.0) : (3.0 - phase * 4.0);
+    return Math.sin(phase * Math.PI * 2.0);
+  }
+
+  private static int envelope(int sampleIndex, int remainingSamples) {
+    final int attackSamples = 80;
+    final int releaseSamples = 180;
+    int level = 256;
+    if (sampleIndex < attackSamples) level = (sampleIndex * 256) / attackSamples;
+    if (remainingSamples < releaseSamples) level = Math.min(level, (remainingSamples * 256) / releaseSamples);
+    return Math.max(0, Math.min(256, level));
+  }
+}

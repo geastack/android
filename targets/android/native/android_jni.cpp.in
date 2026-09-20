@@ -1,0 +1,913 @@
+#include <jni.h>
+
+#include <android/log.h>
+
+#include "app.h"
+#include "css/declarative.h"
+#include "css/engine.h"
+#include "events.h"
+#include "graphics/font.h"
+#include "host/timers.h"
+#include "image.h"
+#include "pixel.h"
+#include "ui/document.h"
+#include "ui/internal.h"
+#include "ui/mirror.h"
+#include "ui/style.h"
+#include "ui/tree_internal.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <ctime>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+extern "C" int gea_embedded_now_ms(void);
+extern "C" void gea_android_display_set_viewport_size(int width, int height);
+extern "C" int gea_android_display_copy_argb8888(std::uint32_t *dst, int pixel_capacity, int *width, int *height);
+extern "C" void gea_android_display_begin_native_canvas(JNIEnv *env, jobject canvas);
+extern "C" void gea_android_display_end_native_canvas();
+extern "C" int gea_android_display_direct_canvas_presented();
+extern "C" void gea_android_display_set_surface(JNIEnv *env, jobject surface);
+extern "C" int gea_android_display_blit_to_surface();
+extern "C" void gea_android_audio_set_bridge_class(JNIEnv *env, jclass bridgeClass);
+extern "C" void gea_android_network_set_bridge_class(JNIEnv *env, jclass bridgeClass);
+
+namespace gea::platform::touch {
+extern "C" void gea_android_touch_set_state(bool touching, int x, int y);
+}
+
+namespace {
+
+constexpr int kFields = 88;
+bool g_initialized = false;
+bool g_app_update_requested = false;
+bool g_css_animation_scan_pending = false;
+bool g_raf_pending = false;
+bool g_needs_frame = false;
+int g_width = 0;
+int g_height = 0;
+float g_dpr = 1.0f;
+std::vector<std::string> g_texts;
+JavaVM *g_java_vm = nullptr;
+jclass g_view_class = nullptr;
+jmethodID g_measure_method = nullptr;
+std::mutex g_measure_cache_mutex;
+std::unordered_map<std::string, std::pair<int, int>> g_measure_cache;
+
+constexpr int kMaxAndroidTouchContacts = 10;
+struct AndroidTouchContact {
+	bool active = false;
+	int platformPointerId = -1;
+	int x = 0;
+	int y = 0;
+};
+AndroidTouchContact g_touch_contacts[kMaxAndroidTouchContacts];
+
+void resetAndroidTouchContacts()
+{
+	for (auto &contact : g_touch_contacts) contact = AndroidTouchContact{};
+}
+
+int findAndroidTouchSlot(int platformPointerId)
+{
+	for (int slot = 0; slot < kMaxAndroidTouchContacts; ++slot) {
+		const auto &contact = g_touch_contacts[slot];
+		if (contact.active && contact.platformPointerId == platformPointerId) return slot;
+	}
+	return -1;
+}
+
+int assignAndroidTouchSlot(int platformPointerId)
+{
+	const int existing = findAndroidTouchSlot(platformPointerId);
+	if (existing >= 0) return existing;
+	for (int slot = 0; slot < kMaxAndroidTouchContacts; ++slot) {
+		if (g_touch_contacts[slot].active) continue;
+		g_touch_contacts[slot].active = true;
+		g_touch_contacts[slot].platformPointerId = platformPointerId;
+		return slot;
+	}
+	return -1;
+}
+
+void syncAndroidTouchCache()
+{
+	int cacheSlot = -1;
+	if (g_touch_contacts[0].active) {
+		cacheSlot = 0;
+	} else {
+		for (int slot = 1; slot < kMaxAndroidTouchContacts; ++slot) {
+			if (g_touch_contacts[slot].active) {
+				cacheSlot = slot;
+				break;
+			}
+		}
+	}
+
+	if (cacheSlot >= 0) {
+		const auto &contact = g_touch_contacts[cacheSlot];
+		gea::platform::touch::gea_android_touch_set_state(true, contact.x, contact.y);
+	} else {
+		gea::platform::touch::gea_android_touch_set_state(false, 0, 0);
+	}
+}
+
+void updateFrameNeed()
+{
+	const gea::host::AnimationFramePerfStats stats = gea::host::animationFramePerfStatsRead();
+	g_raf_pending = stats.requestCount > stats.callbackCount;
+	g_needs_frame = g_app_update_requested || g_css_animation_scan_pending || g_raf_pending ||
+	                gea::css::AnimationEngine::instance().active();
+}
+
+void requestAppUpdate()
+{
+	g_app_update_requested = true;
+	updateFrameNeed();
+}
+
+void scanCssAnimationsIfNeeded(int timestampMs)
+{
+	if (!g_css_animation_scan_pending) return;
+	const std::uint32_t nowMs = static_cast<std::uint32_t>(timestampMs);
+	gea::css::DeclarativeAnimations::scanAndStart(nowMs);
+	gea::embedded::ui::StyleSheet::instance().startCssAnimations(nowMs);
+	g_css_animation_scan_pending = false;
+}
+
+void runPendingNativeWork(int timestampMs)
+{
+	updateFrameNeed();
+	const bool runAppFrame = g_app_update_requested || g_raf_pending;
+	const bool runCssFrame = g_css_animation_scan_pending || gea::css::AnimationEngine::instance().active();
+
+	if (!runAppFrame && !runCssFrame) return;
+
+	if (runCssFrame) {
+		scanCssAnimationsIfNeeded(timestampMs);
+		gea::css::AnimationEngine::instance().tick(static_cast<std::uint32_t>(timestampMs));
+	}
+
+	g_app_update_requested = false;
+	if (runAppFrame) {
+		struct timespec t0, t1;
+		clock_gettime(CLOCK_MONOTONIC, &t0);
+		gea::framework::app::Application::frame(timestampMs);
+		clock_gettime(CLOCK_MONOTONIC, &t1);
+		// 1 Hz achieved-frame-rate log, mirror of the geaos [geaos.loop] perf line
+		// so the same app's fps can be compared across the two stacks straight
+		// from logcat. Counted here (not in a JNI entry point) because mounted-UI
+		// and native-canvas modes drive frames through different bridge calls.
+		static int s_fpsWindowStartMs = 0;
+		static int s_fpsFrames = 0;
+		static long s_appFrameUs = 0;
+		s_appFrameUs += (t1.tv_sec - t0.tv_sec) * 1000000L + (t1.tv_nsec - t0.tv_nsec) / 1000L;
+		if (s_fpsWindowStartMs == 0) s_fpsWindowStartMs = timestampMs;
+		s_fpsFrames++;
+		const int elapsedMs = timestampMs - s_fpsWindowStartMs;
+		if (elapsedMs >= 1000) {
+			__android_log_print(ANDROID_LOG_INFO, "gea.loop",
+			                    "fps=%.1f frames=%d window=%.2fs | app=%.2fms",
+			                    s_fpsFrames * 1000.0 / elapsedMs, s_fpsFrames, elapsedMs / 1000.0,
+			                    (s_appFrameUs / 1000.0) / s_fpsFrames);
+			s_fpsFrames = 0;
+			s_appFrameUs = 0;
+			s_fpsWindowStartMs = timestampMs;
+		}
+	}
+	updateFrameNeed();
+}
+
+JNIEnv *currentEnv()
+{
+	if (!g_java_vm) return nullptr;
+	JNIEnv *env = nullptr;
+	if (g_java_vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) == JNI_OK) return env;
+	if (g_java_vm->AttachCurrentThread(&env, nullptr) != JNI_OK) return nullptr;
+	return env;
+}
+
+jmethodID measureMethod(JNIEnv *env)
+{
+	if (!env) return nullptr;
+	if (!g_view_class) {
+		jclass local = env->FindClass("@PACKAGE_PATH@/GeaNativeView");
+		if (!local) {
+			env->ExceptionClear();
+			return nullptr;
+		}
+		g_view_class = static_cast<jclass>(env->NewGlobalRef(local));
+		env->DeleteLocalRef(local);
+	}
+	if (!g_measure_method && g_view_class) {
+		g_measure_method = env->GetStaticMethodID(g_view_class, "measureTextForNative", "(Ljava/lang/String;ILjava/lang/String;III)[I");
+		if (!g_measure_method) env->ExceptionClear();
+	}
+	return g_measure_method;
+}
+
+std::string measureCacheKey(const char *text, int maxWidth, int fontId, int fontSize, int fontWeight, int lineHeight, const char *family)
+{
+	std::string key;
+	key.reserve(std::strlen(text ? text : "") + std::strlen(family ? family : "") + 48);
+	key.append(text ? text : "");
+	key.push_back('\x1f');
+	key.append(std::to_string(maxWidth));
+	key.push_back('\x1f');
+	key.append(std::to_string(fontId));
+	key.push_back('\x1f');
+	key.append(std::to_string(fontSize));
+	key.push_back('\x1f');
+	key.append(std::to_string(fontWeight));
+	key.push_back('\x1f');
+	key.append(std::to_string(lineHeight));
+	key.push_back('\x1f');
+	key.append(family ? family : "");
+	return key;
+}
+
+int androidColor(gea::embedded::ui::style_color_t color, std::uint8_t alpha = 255)
+{
+#if GEA_EMBEDDED_PIXEL_FORMAT == GEA_PIXEL_ARGB8888
+	std::uint32_t argb = static_cast<std::uint32_t>(color);
+	const int baseAlpha = static_cast<int>((argb >> 24) & 0xffu);
+	const int outAlpha = (baseAlpha * static_cast<int>(alpha) + 127) / 255;
+	return static_cast<int>((argb & 0x00ffffffu) | (static_cast<std::uint32_t>(outAlpha) << 24));
+#else
+	int r = 0;
+	int g = 0;
+	int b = 0;
+	int a = 255;
+	gea::framework::graphics::pixel::unpackNative8(color, &r, &g, &b, &a);
+	a = alpha;
+	return ((a & 0xff) << 24) | ((r & 0xff) << 16) | ((g & 0xff) << 8) | (b & 0xff);
+#endif
+}
+
+bool hasLocalTransform(const gea::embedded::ui::Node &node)
+{
+	const auto &rare = gea::embedded::ui::rstyle(node.style);
+	return rare.transform_rotate != 0 ||
+	       rare.transform_rotate_x != 0 ||
+	       rare.transform_rotate_y != 0 ||
+	       rare.transform_translate_x != 0 ||
+	       rare.transform_translate_y != 0 ||
+	       rare.transform_translate_z != 0 ||
+	       rare.transform_translate_x_percent != 0 ||
+	       rare.transform_translate_y_percent != 0 ||
+	       rare.transform_scale_x != 1000 ||
+	       rare.transform_scale_y != 1000;
+}
+
+bool hasVisualContent(const gea::embedded::ui::Node &node)
+{
+	return node.style.has_bg ||
+	       node.style.border_width > 0 ||
+	       node.type == gea::embedded::ui::NodeType::Text ||
+	       node.type == gea::embedded::ui::NodeType::Image;
+}
+
+void applyViewportResize(int width, int height, float dpr)
+{
+	g_width = width;
+	g_height = height;
+	g_dpr = dpr > 0.0f ? dpr : 1.0f;
+	gea_android_display_set_viewport_size(width, height);
+	gea::embedded::ui::Document::setPreferredMountSize(width, height);
+	gea::embedded::ui::setViewportMetrics(width, height, g_dpr);
+
+	auto &tree = gea::embedded::ui::Tree::instance();
+	const int root = tree.mountedRoot();
+	if (root >= 0) {
+		tree.setStyle(root, gea::embedded::ui::Property::Width, width);
+		tree.setStyle(root, gea::embedded::ui::Property::Height, height);
+		tree.mount(root, width, height);
+	}
+}
+
+int resolvedCircularBorderRadius(const gea::embedded::ui::Node &node)
+{
+	const int width = std::max<int>(0, node.layout.width);
+	const int height = std::max<int>(0, node.layout.height);
+	const int maxRadius = std::min(width, height) / 2;
+	if (maxRadius <= 0) return 0;
+
+	double radii[4]{};
+	for (int i = 0; i < 4; ++i) {
+		if (node.style.border_radius_percent[i] != gea::embedded::ui::kUnset) {
+			const double p = static_cast<double>(node.style.border_radius_percent[i]) / 1000.0;
+			radii[i] = std::max(0.0, std::min(static_cast<double>(width), static_cast<double>(height)) * p);
+		} else {
+			radii[i] = static_cast<double>(std::max<int>(0, node.style.border_radius[i]));
+		}
+	}
+
+	double scale = 1.0;
+	const auto constrain = [&](double limit, double sum) {
+		if (limit > 0.0 && sum > limit) scale = std::min(scale, limit / sum);
+	};
+	constrain(width, radii[0] + radii[1]);
+	constrain(width, radii[3] + radii[2]);
+	constrain(height, radii[0] + radii[3]);
+	constrain(height, radii[1] + radii[2]);
+
+	double minRadius = static_cast<double>(maxRadius);
+	for (double radius : radii) minRadius = std::min(minRadius, radius * scale);
+	return std::max(0, std::min(maxRadius, static_cast<int>(std::lround(minRadius))));
+}
+
+void ensureInitialized(int width, int height, float dpr)
+{
+	if (width <= 0 || height <= 0) return;
+	if (g_initialized) {
+		if (width == g_width && height == g_height && std::fabs(dpr - g_dpr) < 0.01f) return;
+		applyViewportResize(width, height, dpr);
+		updateFrameNeed();
+		return;
+	}
+	g_width = width;
+	g_height = height;
+	g_dpr = dpr > 0.0f ? dpr : 1.0f;
+	resetAndroidTouchContacts();
+	gea::platform::touch::gea_android_touch_set_state(false, 0, 0);
+	gea_android_display_set_viewport_size(width, height);
+	gea::host::animationFramePerfStatsReset();
+	gea::framework::app::Application::init(width, height, g_dpr);
+	g_initialized = true;
+	g_app_update_requested = true;
+	g_css_animation_scan_pending = true;
+	updateFrameNeed();
+}
+
+void appendNode(gea::embedded::ui::Tree &tree, int nodeId, std::vector<jint> &out)
+{
+	if (nodeId < 0 || nodeId >= tree.nodeCount()) return;
+	const auto &node = tree.node(nodeId);
+	const int textIndex = node.type == gea::embedded::ui::NodeType::Text
+	                          ? static_cast<int>(g_texts.size())
+	                          : -1;
+	if (textIndex >= 0) g_texts.push_back(node.text);
+	const char *fontFamily = node.type == gea::embedded::ui::NodeType::Text && node.style.font_id >= 0
+	                             ? gea::framework::graphics::FontRegistry::familyName(node.style.font_id)
+	                             : nullptr;
+	const int fontFamilyIndex = fontFamily && fontFamily[0] != '\0' ? static_cast<int>(g_texts.size()) : -1;
+	if (fontFamilyIndex >= 0) g_texts.push_back(fontFamily);
+
+	const int radius = resolvedCircularBorderRadius(node);
+	const int fontSize = std::max<int>(1, node.style.font_size > 0 ? node.style.font_size : 16);
+	const int clickable = tree.hasEventListener(nodeId) ? 1 : 0;
+	const int momentum = tree.hasAttribute(nodeId, "momentum") ? 1 : 0;
+	const char *tag = tree.tagName(nodeId);
+	int tagHash = 0;
+	if (tag) {
+		for (const char *p = tag; *p; ++p) tagHash = tagHash * 31 + *p;
+	}
+
+	out.push_back(nodeId);
+	out.push_back(static_cast<jint>(node.type));
+	out.push_back(node.parent);
+	out.push_back(node.first_child);
+	out.push_back(node.next_sibling);
+	out.push_back(node.layout.x);
+	out.push_back(node.layout.y);
+	out.push_back(std::max<int>(0, node.layout.width));
+	out.push_back(std::max<int>(0, node.layout.height));
+	out.push_back(node.style.display);
+	out.push_back(node.style.has_bg);
+	out.push_back(androidColor(node.style.bg_color, node.style.bg_alpha));
+	out.push_back(androidColor(node.style.text_color, node.style.text_alpha));
+	out.push_back(node.style.opacity);
+	out.push_back(std::max<int>(0, node.style.border_width));
+	out.push_back(androidColor(node.style.border_color, node.style.border_alpha));
+	out.push_back(radius);
+	out.push_back(fontSize);
+	out.push_back(std::max<int>(0, node.style.line_height));
+	out.push_back(node.style.text_align);
+	out.push_back(clickable);
+	out.push_back(tagHash);
+	out.push_back(textIndex);
+	out.push_back(fontFamilyIndex);
+	out.push_back(node.style.flex_direction);
+	out.push_back(node.style.flex_direction_explicit);
+	out.push_back(node.style.justify_content);
+	out.push_back(node.style.align_items);
+	out.push_back(node.style.align_self);
+	out.push_back(node.style.overflow);
+	out.push_back(node.style.overflow_x);
+	out.push_back(node.style.overflow_y);
+	out.push_back(std::max<int>(0, node.layout.scroll_x));
+	out.push_back(std::max<int>(0, node.layout.scroll_y));
+	out.push_back(std::max<int>(0, node.layout.scroll_content_width));
+	out.push_back(std::max<int>(0, node.layout.scroll_content_height));
+	out.push_back(momentum);
+	out.push_back(node.style.white_space);
+	out.push_back(node.style.text_overflow);
+	out.push_back(node.image_id);
+	const auto &rare = gea::embedded::ui::rstyle(node.style);
+	out.push_back(rare.transform_rotate);
+	out.push_back(rare.transform_rotate_x);
+	out.push_back(rare.transform_rotate_y);
+	out.push_back(rare.transform_translate_x);
+	out.push_back(rare.transform_translate_y);
+	out.push_back(rare.transform_translate_z);
+	out.push_back(rare.transform_translate_x_percent);
+	out.push_back(rare.transform_translate_y_percent);
+	out.push_back(rare.transform_scale_x);
+	out.push_back(rare.transform_scale_y);
+	out.push_back(rare.transform_origin_x);
+	out.push_back(rare.transform_origin_y);
+	out.push_back(rare.perspective);
+	out.push_back(rare.perspective_origin_x);
+	out.push_back(rare.perspective_origin_y);
+	out.push_back(node.style.z_index);
+	out.push_back(node.style.backface_hidden);
+	out.push_back(node.style.bg_fill);
+	out.push_back(node.style.bg_alpha);
+	out.push_back(androidColor(rare.bg_gradient_from_color, rare.bg_gradient_from_alpha));
+	out.push_back(androidColor(rare.bg_gradient_mid_color, rare.bg_gradient_mid_alpha));
+	out.push_back(androidColor(rare.bg_gradient_to_color, rare.bg_gradient_to_alpha));
+	out.push_back(rare.bg_gradient_mid_stop);
+	out.push_back(rare.bg_gradient_to_stop);
+	out.push_back(rare.bg_gradient_has_mid);
+	out.push_back(rare.bg_gradient_angle);
+	out.push_back(rare.bg_grid_axes);
+	out.push_back(androidColor(rare.bg_grid_color, rare.bg_grid_alpha));
+	out.push_back(rare.bg_grid_step_x);
+	out.push_back(rare.bg_grid_step_y);
+	out.push_back(rare.bg_grid_line_x);
+	out.push_back(rare.bg_grid_line_y);
+
+	const int width = std::max<int>(0, node.layout.width);
+	const int height = std::max<int>(0, node.layout.height);
+	int16_t projectedXs[4] = {
+	    static_cast<int16_t>(node.layout.x),
+	    static_cast<int16_t>(node.layout.x + width),
+	    static_cast<int16_t>(node.layout.x + width),
+	    static_cast<int16_t>(node.layout.x),
+	};
+	int16_t projectedYs[4] = {
+	    static_cast<int16_t>(node.layout.y),
+	    static_cast<int16_t>(node.layout.y),
+	    static_cast<int16_t>(node.layout.y + height),
+	    static_cast<int16_t>(node.layout.y + height),
+	};
+	int projectedDepth = 0;
+	const bool projectAsNativeView = width > 0 &&
+	                                 height > 0 &&
+	                                 hasVisualContent(node) &&
+	                                 hasLocalTransform(node) &&
+	                                 gea::embedded::ui::ViewRenderer::anyTransformActive();
+	if (projectAsNativeView) {
+		gea::embedded::ui::ViewRenderer::transformedRectCorners(
+		    node,
+		    false,
+		    node.layout.x,
+		    node.layout.y,
+		    width,
+		    height,
+		    projectedXs,
+		    projectedYs);
+		projectedDepth = gea::embedded::ui::ViewRenderer::transformedDepth(node, false);
+	}
+	out.push_back(projectAsNativeView ? 1 : 0);
+	out.push_back(projectedXs[0]);
+	out.push_back(projectedYs[0]);
+	out.push_back(projectedXs[1]);
+	out.push_back(projectedYs[1]);
+	out.push_back(projectedXs[2]);
+	out.push_back(projectedYs[2]);
+	out.push_back(projectedXs[3]);
+	out.push_back(projectedYs[3]);
+	out.push_back(projectedDepth);
+	out.push_back(node.style.text_transform);
+	out.push_back(std::max<int>(0, node.style.padding[0]));
+	out.push_back(std::max<int>(0, node.style.padding[1]));
+	out.push_back(std::max<int>(0, node.style.padding[2]));
+	out.push_back(std::max<int>(0, node.style.padding[3]));
+	out.push_back(std::clamp<int>(node.style.font_weight, 1, 1000));
+
+	for (int child = node.first_child; child >= 0; child = tree.node(child).next_sibling) {
+		appendNode(tree, child, out);
+	}
+}
+
+jintArray snapshot(JNIEnv *env)
+{
+	auto &tree = gea::embedded::ui::Tree::instance();
+	g_texts.clear();
+	std::vector<jint> out;
+	const int root = tree.mountedRoot();
+	if (root >= 0) {
+		out.reserve(static_cast<std::size_t>(tree.nodeCount()) * kFields);
+		appendNode(tree, root, out);
+	}
+	jintArray array = env->NewIntArray(static_cast<jsize>(out.size()));
+	if (!array) return nullptr;
+	if (!out.empty()) env->SetIntArrayRegion(array, 0, static_cast<jsize>(out.size()), out.data());
+	return array;
+}
+
+bool dispatchTouchPhase(int phase, bool touching, int x, int y, int pointerId)
+{
+	if (phase == 0) {
+		gea::framework::events::TouchRuntime::resetGestureState();
+		resetAndroidTouchContacts();
+		gea::platform::touch::gea_android_touch_set_state(false, x, y);
+		return true;
+	}
+
+	gea::framework::events::TouchPhase touchPhase{};
+	switch (phase) {
+	case 1: touchPhase = gea::framework::events::TouchPhase::Down; break;
+	case 2: touchPhase = gea::framework::events::TouchPhase::Move; break;
+	case 3: touchPhase = gea::framework::events::TouchPhase::Up; break;
+	default: return false;
+	}
+
+	const int platformPointerId = std::max(0, pointerId);
+	int touchSlot = -1;
+	if (touching) {
+		touchSlot = assignAndroidTouchSlot(platformPointerId);
+		if (touchSlot < 0) return false;
+		g_touch_contacts[touchSlot].x = x;
+		g_touch_contacts[touchSlot].y = y;
+		syncAndroidTouchCache();
+	} else {
+		touchSlot = findAndroidTouchSlot(platformPointerId);
+		if (touchSlot < 0) return false;
+	}
+
+	gea::framework::events::Event event{};
+	event.type = gea::framework::events::EventType::Touch;
+	event.touchPhase = touchPhase;
+	event.touching = touching;
+	event.x = x;
+	event.y = y;
+	event.pointerId = touchSlot;
+	auto &tree = gea::embedded::ui::Tree::instance();
+	const bool immediateMode = tree.mountedRoot() < 0;
+	bool shouldSync = immediateMode;
+	if (!immediateMode) {
+		if (phase == 1) {
+			shouldSync = tree.hasListenersForType("touchstart");
+		} else if (phase == 2) {
+			shouldSync = tree.hasListenersForType("touchmove");
+		} else if (phase == 3) {
+			shouldSync = true;
+		}
+	}
+	const bool changed = gea::framework::events::TouchRuntime::dispatchEvent(event);
+	if (!touching) {
+		g_touch_contacts[touchSlot] = AndroidTouchContact{};
+		syncAndroidTouchCache();
+	}
+	const bool syncChangedState = shouldSync || !immediateMode;
+	if (changed && syncChangedState) requestAppUpdate();
+	return changed && syncChangedState;
+}
+
+void dispatchTap(int x, int y)
+{
+	const bool downChanged = dispatchTouchPhase(1, true, x, y, 0);
+	const bool upChanged = dispatchTouchPhase(3, false, x, y, 0);
+	if (downChanged || upChanged) requestAppUpdate();
+}
+
+std::string jstringToUtf8(JNIEnv *env, jstring value)
+{
+	if (!env || !value) return std::string();
+	const char *chars = env->GetStringUTFChars(value, nullptr);
+	if (!chars) return std::string();
+	std::string out(chars);
+	env->ReleaseStringUTFChars(value, chars);
+	return out;
+}
+
+bool dispatchInputEvent(int nodeId)
+{
+	auto &tree = gea::embedded::ui::Tree::instance();
+	if (nodeId < 0 || nodeId >= tree.nodeCount()) return false;
+	gea::framework::events::PointerEvent event{};
+	event.type = gea::framework::events::PointerEventType::Input;
+	event.targetId = nodeId;
+	const bool changed = tree.dispatchEvent(event);
+	if (changed) requestAppUpdate();
+	return changed;
+}
+
+bool dispatchKeyDownEvent(int nodeId, int keyCode)
+{
+	auto &tree = gea::embedded::ui::Tree::instance();
+	if (nodeId < 0 || nodeId >= tree.nodeCount()) return false;
+	gea::framework::events::PointerEvent event{};
+	event.type = gea::framework::events::PointerEventType::KeyDown;
+	event.targetId = nodeId;
+	event.keyCode = keyCode;
+	const bool changed = tree.dispatchEvent(event);
+	if (changed) requestAppUpdate();
+	return changed;
+}
+
+}  // namespace
+
+extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *)
+{
+	g_java_vm = vm;
+	return JNI_VERSION_1_6;
+}
+
+bool measureTextForAndroid(const char *text,
+                           int maxWidth,
+                           int fontId,
+                           int fontSize,
+                           int fontWeight,
+                           int lineHeight,
+                           int *outWidth,
+                           int *outHeight)
+{
+	if (!outWidth || !outHeight) return false;
+	if (!text || !text[0]) {
+		*outWidth = 0;
+		*outHeight = 0;
+		return true;
+	}
+	const char *family = fontId >= 0 ? gea::framework::graphics::FontRegistry::familyName(fontId) : "";
+	const int safeWeight = std::clamp<int>(fontWeight, 1, 1000);
+	std::string key = measureCacheKey(text, maxWidth, fontId, fontSize, safeWeight, lineHeight, family);
+	{
+		std::scoped_lock guard(g_measure_cache_mutex);
+		auto it = g_measure_cache.find(key);
+		if (it != g_measure_cache.end()) {
+			*outWidth = it->second.first;
+			*outHeight = it->second.second;
+			return true;
+		}
+	}
+
+	JNIEnv *env = currentEnv();
+	jmethodID method = measureMethod(env);
+	if (!env || !method) return false;
+	jstring jText = env->NewStringUTF(text);
+	jstring jFamily = env->NewStringUTF(family ? family : "");
+	if (!jText || !jFamily) {
+		if (jText) env->DeleteLocalRef(jText);
+		if (jFamily) env->DeleteLocalRef(jFamily);
+		return false;
+	}
+	jobject result = env->CallStaticObjectMethod(
+	    g_view_class,
+	    method,
+	    jText,
+	    static_cast<jint>(maxWidth),
+	    jFamily,
+	    static_cast<jint>(fontSize),
+	    static_cast<jint>(safeWeight),
+	    static_cast<jint>(lineHeight));
+	env->DeleteLocalRef(jText);
+	env->DeleteLocalRef(jFamily);
+	if (env->ExceptionCheck()) {
+		env->ExceptionClear();
+		return false;
+	}
+	jintArray array = static_cast<jintArray>(result);
+	if (!array || env->GetArrayLength(array) < 2) {
+		if (array) env->DeleteLocalRef(array);
+		return false;
+	}
+	jint measured[2] = {0, 0};
+	env->GetIntArrayRegion(array, 0, 2, measured);
+	env->DeleteLocalRef(array);
+	*outWidth = std::max(0, static_cast<int>(measured[0]));
+	*outHeight = std::max(0, static_cast<int>(measured[1]));
+	{
+		std::scoped_lock guard(g_measure_cache_mutex);
+		if (g_measure_cache.size() > 8192) g_measure_cache.clear();
+		g_measure_cache.emplace(std::move(key), std::make_pair(*outWidth, *outHeight));
+	}
+	return true;
+}
+
+extern "C" bool gea_host_measure_text_with_line_height(const char *text,
+                                                       int maxWidth,
+                                                       int fontId,
+                                                       int fontSize,
+                                                       int lineHeight,
+                                                       int *outWidth,
+                                                       int *outHeight)
+{
+	return measureTextForAndroid(text, maxWidth, fontId, fontSize, 400, lineHeight, outWidth, outHeight);
+}
+
+extern "C" bool gea_host_measure_text_with_style(const char *text,
+                                                 int maxWidth,
+                                                 int fontId,
+                                                 int fontSize,
+                                                 int fontWeight,
+                                                 int lineHeight,
+                                                 int *outWidth,
+                                                 int *outHeight)
+{
+	return measureTextForAndroid(text, maxWidth, fontId, fontSize, fontWeight, lineHeight, outWidth, outHeight);
+}
+
+extern "C" JNIEXPORT void JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeInit(JNIEnv *env, jclass bridgeClass, jint width, jint height, jfloat dpr)
+{
+	gea_android_audio_set_bridge_class(env, bridgeClass);
+	gea_android_network_set_bridge_class(env, bridgeClass);
+	ensureInitialized(width, height, dpr);
+	updateFrameNeed();
+}
+
+extern "C" JNIEXPORT jintArray JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeFrame(JNIEnv *env, jclass, jint width, jint height, jfloat dpr, jlong frameTimeNanos)
+{
+	ensureInitialized(width, height, dpr);
+	const int timestampMs = frameTimeNanos > 0
+	                            ? static_cast<int>(frameTimeNanos / 1000000LL)
+	                            : gea_embedded_now_ms();
+	runPendingNativeWork(timestampMs);
+	return snapshot(env);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeHasMountedRoot(JNIEnv *, jclass, jint width, jint height, jfloat dpr)
+{
+	ensureInitialized(width, height, dpr);
+	return gea::embedded::ui::Tree::instance().mountedRoot() >= 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jintArray JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeDrawFrame(JNIEnv *env, jclass, jobject canvas, jint width, jint height, jfloat dpr, jlong frameTimeNanos)
+{
+	ensureInitialized(width, height, dpr);
+	const int timestampMs = frameTimeNanos > 0
+	                            ? static_cast<int>(frameTimeNanos / 1000000LL)
+	                            : gea_embedded_now_ms();
+	if (gea::embedded::ui::Tree::instance().mountedRoot() >= 0) {
+		runPendingNativeWork(timestampMs);
+		return snapshot(env);
+	}
+	gea_android_display_begin_native_canvas(env, canvas);
+	runPendingNativeWork(timestampMs);
+	gea_android_display_end_native_canvas();
+	return snapshot(env);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeDidDrawNativeCanvas(JNIEnv *, jclass)
+{
+	return gea_android_display_direct_canvas_presented() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeSetSurface(JNIEnv *env, jclass, jobject surface)
+{
+	gea_android_display_set_surface(env, surface);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeBlitToSurface(JNIEnv *, jclass)
+{
+	return gea_android_display_blit_to_surface() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jint JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeCanvasPixels(JNIEnv *env, jclass, jintArray target)
+{
+	int width = 0;
+	int height = 0;
+	gea_android_display_copy_argb8888(nullptr, 0, &width, &height);
+	if (width <= 0 || height <= 0) return 0;
+
+	const int pixelCount = width * height;
+	const int requiredLength = pixelCount + 2;
+	if (!target || env->GetArrayLength(target) < requiredLength) return requiredLength;
+
+	jint *out = static_cast<jint *>(env->GetPrimitiveArrayCritical(target, nullptr));
+	if (!out) return 0;
+	out[0] = width;
+	out[1] = height;
+	const bool ok = gea_android_display_copy_argb8888(
+	    reinterpret_cast<std::uint32_t *>(out + 2), pixelCount, &width, &height);
+	env->ReleasePrimitiveArrayCritical(target, out, ok ? 0 : JNI_ABORT);
+	return ok ? requiredLength : 0;
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeTexts(JNIEnv *env, jclass)
+{
+	jclass stringClass = env->FindClass("java/lang/String");
+	jobjectArray array = env->NewObjectArray(static_cast<jsize>(g_texts.size()), stringClass, env->NewStringUTF(""));
+	if (!array) return nullptr;
+	for (jsize i = 0; i < static_cast<jsize>(g_texts.size()); i++) {
+		jstring text = env->NewStringUTF(g_texts[static_cast<std::size_t>(i)].c_str());
+		env->SetObjectArrayElement(array, i, text);
+		env->DeleteLocalRef(text);
+	}
+	return array;
+}
+
+extern "C" JNIEXPORT jintArray JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeImagePixels(JNIEnv *env, jclass, jint imageId)
+{
+	auto &images = gea::framework::graphics::ImageStore::instance();
+	const int width = images.width(static_cast<int>(imageId));
+	const int height = images.height(static_cast<int>(imageId));
+	const auto *pixels = images.currentPixels(static_cast<int>(imageId));
+	if (width <= 0 || height <= 0 || !pixels) return env->NewIntArray(0);
+
+	const int pixelCount = width * height;
+	jintArray array = env->NewIntArray(static_cast<jsize>(pixelCount + 2));
+	if (!array) return nullptr;
+
+	std::vector<jint> out(static_cast<std::size_t>(pixelCount + 2));
+	out[0] = width;
+	out[1] = height;
+	const std::uint8_t *alpha = images.currentAlpha(static_cast<int>(imageId));
+	for (int i = 0; i < pixelCount; i++) {
+		int r = 0;
+		int g = 0;
+		int b = 0;
+		int a = 255;
+		gea::framework::graphics::pixel::unpackNative8(pixels[i], &r, &g, &b, &a);
+		if (alpha) a = alpha[i];
+		out[static_cast<std::size_t>(i + 2)] = static_cast<jint>(((a & 0xff) << 24) |
+		                                                        ((r & 0xff) << 16) |
+		                                                        ((g & 0xff) << 8) |
+		                                                        (b & 0xff));
+	}
+	env->SetIntArrayRegion(array, 0, static_cast<jsize>(out.size()), out.data());
+	return array;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeNeedsFrame(JNIEnv *, jclass)
+{
+	return g_needs_frame ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeClick(JNIEnv *, jclass, jint nodeId)
+{
+	auto &tree = gea::embedded::ui::Tree::instance();
+	if (nodeId < 0 || nodeId >= tree.nodeCount()) return;
+	const auto &node = tree.node(nodeId);
+	const int x = node.layout.x + node.layout.width / 2;
+	const int y = node.layout.y + node.layout.height / 2;
+	dispatchTap(x, y);
+}
+
+extern "C" JNIEXPORT void JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeTap(JNIEnv *, jclass, jint x, jint y)
+{
+	dispatchTap(x, y);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeTouch(JNIEnv *, jclass, jint phase, jboolean touching, jint x, jint y, jint pointerId)
+{
+	return dispatchTouchPhase(static_cast<int>(phase), touching == JNI_TRUE, x, y, pointerId) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeScrollBy(JNIEnv *, jclass, jint nodeId, jint dx, jint dy)
+{
+	auto &mirror = gea::embedded::ui::Mirror::instance();
+	const int id = static_cast<int>(nodeId);
+	const int beforeX = mirror.scrollX(id);
+	const int beforeY = mirror.scrollY(id);
+	if (dx != 0) mirror.setScrollX(id, beforeX + static_cast<int>(dx));
+	if (dy != 0) mirror.setScrollY(id, beforeY + static_cast<int>(dy));
+	const bool changed = mirror.scrollX(id) != beforeX || mirror.scrollY(id) != beforeY;
+	if (changed) requestAppUpdate();
+	return changed ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jstring JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeAttribute(JNIEnv *env, jclass, jint nodeId, jstring name)
+{
+	auto &tree = gea::embedded::ui::Tree::instance();
+	if (nodeId < 0 || nodeId >= tree.nodeCount()) return env->NewStringUTF("");
+	const std::string attrName = jstringToUtf8(env, name);
+	return env->NewStringUTF(tree.getAttribute(static_cast<int>(nodeId), attrName.c_str()));
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeInput(JNIEnv *env, jclass, jint nodeId, jstring value)
+{
+	auto &tree = gea::embedded::ui::Tree::instance();
+	if (nodeId < 0 || nodeId >= tree.nodeCount()) return JNI_FALSE;
+	const std::string text = jstringToUtf8(env, value);
+	tree.setAttribute(static_cast<int>(nodeId), "value", text.c_str());
+	return dispatchInputEvent(static_cast<int>(nodeId)) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeKeyDown(JNIEnv *, jclass, jint nodeId, jint keyCode)
+{
+	return dispatchKeyDownEvent(static_cast<int>(nodeId), static_cast<int>(keyCode)) ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeFocusInput(JNIEnv *, jclass, jint nodeId, jboolean focused)
+{
+	auto &tree = gea::embedded::ui::Tree::instance();
+	if (focused == JNI_TRUE) {
+		if (nodeId >= 0 && nodeId < tree.nodeCount()) tree.setActiveInput(static_cast<int>(nodeId));
+	} else if (tree.activeInputId() == nodeId) {
+		tree.setActiveInput(-1);
+	}
+	requestAppUpdate();
+}
+
+extern "C" JNIEXPORT jstring JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeRenderer(JNIEnv *env, jclass)
+{
+	return env->NewStringUTF("native-android-views");
+}
