@@ -21,13 +21,51 @@ jmethodID g_fetch_method = nullptr;
 jmethodID g_connected_method = nullptr;
 std::mutex g_jni_mutex;
 
+// A thread this file attaches to the VM has to detach before it exits, or ART
+// aborts the process ("native thread exited without detaching"). Every fetch runs
+// on its own detached std::thread (host/host/fetch.cpp), so the guard lives in
+// that thread's storage and detaches while the thread unwinds. Threads the VM
+// already knows -- the UI thread, which GetEnv finds attached -- are never armed,
+// because detaching one we did not attach would tear down its JNI state.
+class JniThreadAttachment {
+public:
+	~JniThreadAttachment()
+	{
+		if (attached_ && g_java_vm) g_java_vm->DetachCurrentThread();
+	}
+
+	void arm() { attached_ = true; }
+
+private:
+	bool attached_ = false;
+};
+
 JNIEnv *currentEnv()
 {
 	if (!g_java_vm) return nullptr;
+	thread_local JniThreadAttachment attachment;
 	JNIEnv *env = nullptr;
 	if (g_java_vm->GetEnv(reinterpret_cast<void **>(&env), JNI_VERSION_1_6) == JNI_OK) return env;
 	if (g_java_vm->AttachCurrentThread(&env, nullptr) != JNI_OK) return nullptr;
+	attachment.arm();
 	return env;
+}
+
+struct BridgeRefs {
+	jclass clazz = nullptr;
+	jmethodID fetchMethod = nullptr;
+	jmethodID connectedMethod = nullptr;
+};
+
+// The globals are written once, by gea_android_network_set_bridge_class. Copy
+// them under the lock and let it go before calling into Java: a fetch parks its
+// thread inside HttpURLConnection for up to 35s, and the frame thread asks
+// wifi().connected() every tick, so holding the lock across the call would stall
+// the UI for the whole request.
+BridgeRefs bridgeRefs()
+{
+	std::scoped_lock guard(g_jni_mutex);
+	return BridgeRefs{g_bridge_class, g_fetch_method, g_connected_method};
 }
 
 std::int32_t readInt32LE(const std::vector<std::uint8_t> &bytes, std::size_t offset)
@@ -103,9 +141,9 @@ gea::host::FetchResponse parsePackedFetch(const std::vector<std::uint8_t> &packe
 bool androidConnected()
 {
 	JNIEnv *env = currentEnv();
-	std::scoped_lock guard(g_jni_mutex);
-	if (!env || !g_bridge_class || !g_connected_method) return true;
-	const jboolean connected = env->CallStaticBooleanMethod(g_bridge_class, g_connected_method);
+	const BridgeRefs refs = bridgeRefs();
+	if (!env || !refs.clazz || !refs.connectedMethod) return true;
+	const jboolean connected = env->CallStaticBooleanMethod(refs.clazz, refs.connectedMethod);
 	if (env->ExceptionCheck()) {
 		env->ExceptionClear();
 		return true;
@@ -116,11 +154,11 @@ bool androidConnected()
 gea::host::FetchResponse androidFetch(const std::string &url)
 {
 	JNIEnv *env = currentEnv();
-	std::scoped_lock guard(g_jni_mutex);
-	if (!env || !g_bridge_class || !g_fetch_method) return {};
+	const BridgeRefs refs = bridgeRefs();
+	if (!env || !refs.clazz || !refs.fetchMethod) return {};
 	jstring jUrl = env->NewStringUTF(url.c_str());
 	if (!jUrl) return {};
-	jobject resultObject = env->CallStaticObjectMethod(g_bridge_class, g_fetch_method, jUrl);
+	jobject resultObject = env->CallStaticObjectMethod(refs.clazz, refs.fetchMethod, jUrl);
 	env->DeleteLocalRef(jUrl);
 	if (env->ExceptionCheck()) {
 		env->ExceptionClear();
