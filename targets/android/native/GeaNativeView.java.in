@@ -54,7 +54,7 @@ import java.util.Map;
 import java.util.Set;
 
 public final class GeaNativeView extends FrameLayout implements Choreographer.FrameCallback {
-  private static final int FIELDS = 88;
+  private static final int FIELDS = 89;
   private static final float CONFIGURED_DEVICE_PIXEL_RATIO = @DEVICE_PIXEL_RATIO@f;
   private static final float DESIGN_WIDTH = @DESIGN_WIDTH@f;
   private static final boolean DEBUG_VIEW_BOUNDS = @DEBUG_VIEW_BOUNDS@;
@@ -155,6 +155,7 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
   private static final int O_PADDING_BOTTOM = 85;
   private static final int O_PADDING_LEFT = 86;
   private static final int O_FONT_WEIGHT = 87;
+  private static final int O_IMAGE_FIT = 88;
   private static final int TAG_P = tagHash("p");
   private static final int TAG_INPUT = tagHash("input");
   private static final int MAX_TOUCH_SLOTS = 10;
@@ -1017,6 +1018,7 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
     } else if (view instanceof EditTextNodeView) {
       applyEditTextProps((EditTextNodeView) view, nodes, texts, base);
     } else if (view instanceof ImageNodeView) {
+      ((ImageNodeView) view).setImageFit(nodes[base + O_IMAGE_FIT]);
       ((ImageNodeView) view).setImageId(nodes[base + O_IMAGE_ID], imageBitmaps);
       view.setContentDescription("gea-image:" + id + ":" + nodes[base + O_IMAGE_ID]);
     } else {
@@ -1923,6 +1925,22 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
       setScaleType(ImageView.ScaleType.FIT_XY);
       setAdjustViewBounds(false);
       setClipToOutline(false);
+    }
+
+    // object-fit. FIT_XY was hard-coded here, so every image stretched to its box
+    // regardless of what the CSS asked for — weather's forecast icons are square
+    // in a 24x20 slot and came out 20% too wide. ImageView has no scale-down, so
+    // that value takes the nearest honest behaviour, FIT_CENTER.
+    void setImageFit(int fit) {
+      final ImageView.ScaleType scaleType;
+      switch (fit) {
+        case 1: scaleType = ImageView.ScaleType.FIT_CENTER; break;   // contain
+        case 2: scaleType = ImageView.ScaleType.CENTER_CROP; break;  // cover
+        case 3: scaleType = ImageView.ScaleType.CENTER; break;       // none
+        case 4: scaleType = ImageView.ScaleType.FIT_CENTER; break;   // scale-down
+        default: scaleType = ImageView.ScaleType.FIT_XY;             // fill
+      }
+      if (getScaleType() != scaleType) setScaleType(scaleType);
     }
 
     void setImageId(int imageId, Map<Integer, Bitmap> cache) {

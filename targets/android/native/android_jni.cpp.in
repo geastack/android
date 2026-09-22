@@ -43,7 +43,7 @@ extern "C" void gea_android_touch_set_state(bool touching, int x, int y);
 
 namespace {
 
-constexpr int kFields = 88;
+constexpr int kFields = 89;
 bool g_initialized = false;
 bool g_app_update_requested = false;
 bool g_css_animation_scan_pending = false;
@@ -490,6 +490,9 @@ void appendNode(gea::embedded::ui::Tree &tree, int nodeId, std::vector<jint> &ou
 	out.push_back(std::max<int>(0, node.style.padding[2]));
 	out.push_back(std::max<int>(0, node.style.padding[3]));
 	out.push_back(std::clamp<int>(node.style.font_weight, 1, 1000));
+	// object-fit: 0 fill, 1 contain, 2 cover, 3 none, 4 scale-down (imageFitValue
+	// in the style engine). Appended last so the existing field indices stay put.
+	out.push_back(node.style.image_fit);
 
 	for (int child = node.first_child; child >= 0; child = tree.node(child).next_sibling) {
 		appendNode(tree, child, out);
