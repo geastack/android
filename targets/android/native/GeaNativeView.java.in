@@ -56,6 +56,7 @@ import java.util.Set;
 public final class GeaNativeView extends FrameLayout implements Choreographer.FrameCallback {
   private static final int FIELDS = 88;
   private static final float CONFIGURED_DEVICE_PIXEL_RATIO = @DEVICE_PIXEL_RATIO@f;
+  private static final float DESIGN_WIDTH = @DESIGN_WIDTH@f;
   private static final boolean DEBUG_VIEW_BOUNDS = @DEBUG_VIEW_BOUNDS@;
   private static final int DISPLAY_NONE = 1;
   private static final int DISPLAY_FLEX = 3;
@@ -712,6 +713,12 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
 
   private float devicePixelRatio() {
     if (CONFIGURED_DEVICE_PIXEL_RATIO > 0.0f) return CONFIGURED_DEVICE_PIXEL_RATIO;
+    // An app that declares a design width was laid out in those logical px, so
+    // scale it to fill this surface instead of following the panel's density:
+    // the engine multiplies every CSS px by the ratio we report. Recomputed per
+    // frame, so a surface resize reflows (ensureInitialized picks up the change).
+    int width = getWidth();
+    if (DESIGN_WIDTH > 0.0f && width > 0) return width / DESIGN_WIDTH;
     float density = getResources().getDisplayMetrics().density;
     return density > 0.0f ? density : 1.0f;
   }
