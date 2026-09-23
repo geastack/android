@@ -1,6 +1,9 @@
 # Android target
 
-Builds GeaStack web-rendered apps into a small native Android WebView APK.
+Builds GeaStack apps into native Android APKs. geatsc compiles the app to C++,
+the NDK builds it into a native library, and each component node is rendered as
+a real Android view (`FrameLayout`, `TextView`, `ImageView`, `ScrollView`, ...)
+through JNI. There is no WebView and no JavaScript engine on the device.
 
 ```sh
 targets/android/build-android.sh css-3d-cube debug
@@ -17,14 +20,19 @@ Useful environment overrides:
 
 - `GEA_ANDROID_SERIAL`: adb serial for the target board.
 - `GEA_ANDROID_ADB`: adb binary to use when multiple Android SDKs are installed.
-- `GEA_ANDROID_DISABLE_WEBVIEW_MULTIPROCESS=0`: skip the default
-  `cmd webviewupdate disable-multiprocess` device workaround.
-- `GEA_ANDROID_WEBVIEW_LAYER_TYPE=software`: force a software WebView layer.
-- `GEA_ANDROID_DEBUG_LOGS=1`: emit WebView lifecycle and DOM probes to logcat.
+- `GEA_ANDROID_NDK` / `GEA_ANDROID_CMAKE`: NDK and CMake to use (default: the
+  latest installed in the SDK).
+- `GEA_ANDROID_ABI`: native ABI to build (default `arm64-v8a`).
+- `GEA_ANDROID_MIN_SDK`: minimum SDK level (default `23`).
+- `GEA_ANDROID_PACKAGE_NAME`: Java package name (default: derived from the app id).
+- `GEA_ANDROID_SCREEN_ORIENTATION`: activity orientation (default `portrait`).
+- `GEA_ANDROID_DEVICE_PIXEL_RATIO`: CSS pixel ratio (default `1.5`).
+- `GEA_ANDROID_BUILD_JOBS`: parallel native compile jobs (default `4`).
+- `GEA_ANDROID_KEYSTORE`, `GEA_ANDROID_KEYSTORE_PASS`, `GEA_ANDROID_KEY_ALIAS`,
+  `GEA_ANDROID_KEY_PASS`: signing key (default: the Android debug keystore).
+- `GEA_ANDROID_DEBUG_VIEW_BOUNDS=1`: outline every native view's bounds.
 
-The packager inlines the Vite output into the APK and loads it as base64 HTML.
-That keeps Gea apps independent of Android asset URL quirks on watch-style
-boards such as the Lokmat APPLLP Max.
+The build fails if the generated Java or native sources reference a WebView.
 
 ## License
 

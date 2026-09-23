@@ -1,7 +1,7 @@
 {
   "name": "@geastack/android",
   "version": "0.1.0",
-  "description": "Native Android build target for GeaStack apps: builds web-rendered apps into a small WebView APK without Gradle.",
+  "description": "Native Android build target for GeaStack apps: compiles apps to native code and renders them with real Android views, no WebView, without Gradle.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
