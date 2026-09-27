@@ -841,6 +841,18 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
         parentX = nodes[parentBase + O_X];
         parentY = nodes[parentBase + O_Y];
       }
+      // The engine has already moved a scroller's children by its offset
+      // (resolveAbsoluteCoords subtracts scroll_x/scroll_y), and the ScrollView
+      // moves its content by it again (place -> setNativeScroll). Undo the
+      // engine's share so the children sit in the content's unscrolled space and
+      // only the native scroll moves them: content then tracks the finger 1:1,
+      // what is drawn is what the engine hit-tests, and a scroll step no longer
+      // re-lays-out every child. The offset the ScrollView actually took is used,
+      // so one it had to clamp still draws where the engine placed the children.
+      if (parentView instanceof ScrollNodeView) {
+        parentX -= parentView.getScrollX();
+        parentY -= parentView.getScrollY();
+      }
     }
     if (view.getParent() != parent) {
       if (view.getParent() instanceof ViewGroup) ((ViewGroup) view.getParent()).removeView(view);
