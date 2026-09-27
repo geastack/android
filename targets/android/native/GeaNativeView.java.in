@@ -159,7 +159,6 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
   private static final int TAG_P = tagHash("p");
   private static final int TAG_INPUT = tagHash("input");
   private static final int MAX_TOUCH_SLOTS = 10;
-  private static final int NATIVE_SCROLL_TOUCH_SLOP = 8;
   private static final float NATIVE_SCROLL_FLING_BOOST = 1.35f;
 
   private final Map<Integer, View> views = new HashMap<>();
@@ -191,6 +190,7 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
   private boolean nativeScrollStarted;
   private final OverScroller nativeScrollFling;
   private final Runnable nativeScrollFlingStep;
+  private final int nativeScrollTouchSlop;
   private final int nativeScrollMinimumFlingVelocity;
   private final int nativeScrollMaximumFlingVelocity;
   private VelocityTracker nativeScrollVelocityTracker;
@@ -210,6 +210,11 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
     super(context);
     nativeScrollFling = new OverScroller(context);
     ViewConfiguration viewConfig = ViewConfiguration.get(context);
+    // How far a finger may wander before a press on a scroller becomes a drag.
+    // A fixed 8 raw px was ~2 CSS px on a 1080-wide phone, so the jitter of an
+    // ordinary tap on a rail's chip turned into a pan and lost its click. The
+    // platform's slop is sized to a fingertip on this panel.
+    nativeScrollTouchSlop = viewConfig.getScaledTouchSlop();
     nativeScrollMinimumFlingVelocity = viewConfig.getScaledMinimumFlingVelocity();
     nativeScrollMaximumFlingVelocity = viewConfig.getScaledMaximumFlingVelocity();
     nativeScrollFlingStep = new Runnable() {
@@ -325,11 +330,15 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
           if (nativeScrollAxis == 0) {
             int totalDx = x - nativeScrollStartX;
             int totalDy = y - nativeScrollStartY;
-            if (Math.abs(totalDx) > NATIVE_SCROLL_TOUCH_SLOP || Math.abs(totalDy) > NATIVE_SCROLL_TOUCH_SLOP) {
+            if (Math.abs(totalDx) > nativeScrollTouchSlop || Math.abs(totalDy) > nativeScrollTouchSlop) {
               boolean canScrollX = nativeScrollTouchTarget.canScrollX();
               boolean canScrollY = nativeScrollTouchTarget.canScrollY();
-              if (canScrollX && (!canScrollY || Math.abs(totalDx) >= Math.abs(totalDy))) nativeScrollAxis = 1;
+              // Only a mostly sideways travel pans sideways, even on a rail that
+              // scrolls no other way: a vertical swipe that happens to start on
+              // one is not the rail's, so it goes back to the engine unclaimed.
+              if (canScrollX && Math.abs(totalDx) >= Math.abs(totalDy)) nativeScrollAxis = 1;
               else if (canScrollY) nativeScrollAxis = 2;
+              else resetNativeScrollTouch();
             }
           }
           boolean changed = false;
