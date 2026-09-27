@@ -342,8 +342,24 @@ APP_RUNTIME="$(node -e "const app = JSON.parse(process.argv[1]); process.stdout.
 APP_NAME="$(node -e "const app = JSON.parse(process.argv[1]); process.stdout.write(app.name || app.id)" "$APP_JSON")"
 # Logical CSS width the app's stylesheets were authored against, 0 when it
 # declares none. The view turns it into a device pixel ratio at runtime, once it
-# knows the real surface width.
-APP_DESIGN_WIDTH="$(node -e "const app = JSON.parse(process.argv[1]); process.stdout.write(String(app.designWidth || 0))" "$APP_JSON")"
+# knows the real surface width. The published CLI's `inspect` does not report
+# the field yet, so fall back to the app's own package.json `gea.designWidth`
+# (as build-windows.mjs does); without it the layout would render at panel
+# density instead of filling the width.
+APP_DESIGN_WIDTH="$(node -e "
+const fs = require('fs')
+const path = require('path')
+const app = JSON.parse(process.argv[1])
+let width = Number(app.designWidth || 0)
+if (!(width > 0)) {
+  try {
+    width = Number(JSON.parse(fs.readFileSync(path.join(app.root, 'package.json'), 'utf8')).gea?.designWidth || 0)
+  } catch {
+    width = 0
+  }
+}
+process.stdout.write(String(width > 0 ? width : 0))
+" "$APP_JSON")"
 
 if [ "$APP_RUNTIME" != "gea" ]; then
   echo "ERROR: Android target only supports runtime=gea apps for now: $APP_ID is runtime=$APP_RUNTIME" >&2
