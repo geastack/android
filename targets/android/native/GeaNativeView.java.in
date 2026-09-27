@@ -1059,12 +1059,14 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
         setTypefaceIfChanged(text, typefaceForFamily(fontFamily, nodes[base + O_FONT_WEIGHT]));
         applyLineHeight(text, nodes[base + O_LINE_HEIGHT]);
         boolean boundedWidth = applyTextWrapping(text, nodes, base);
+        int gravity = textGravity(nodes, base);
         if (view instanceof TextNodeView) {
           TextNodeView textNode = (TextNodeView) view;
           textNode.setBoundedTextWidth(boundedWidth);
-          textNode.setVisualTextShiftY(visualTextShiftY(fontSize, nodes[base + O_LINE_HEIGHT], displayValue));
+          textNode.setLineGravity(gravity & Gravity.HORIZONTAL_GRAVITY_MASK);
+          textNode.setLineShiftY(halfLeading(text, nodes[base + O_LINE_HEIGHT]));
         }
-        setGravityIfChanged(text, textGravity(nodes, base));
+        setGravityIfChanged(text, gravity);
       }
     }
 
@@ -1517,16 +1519,18 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
     text.setLineSpacing(target - fontHeight, 1.0f);
   }
 
-  private int visualTextShiftY(int fontSize, int lineHeight, String value) {
-    int size = Math.max(1, fontSize);
-    int targetLineHeight = Math.max(0, lineHeight);
-    int compressed = targetLineHeight > 0 ? Math.max(0, size - targetLineHeight) : 0;
-    int shift = Math.round(size * 0.38f - 5.0f + compressed / 3.0f);
-    if (shift <= 0) return 0;
-    if (size < 18) return Math.min(shift, 1);
-    if (size < 24) return Math.min(shift, 4);
-    if ("°".equals(value) && size <= 30) return shift + 5;
-    return shift;
+  // CSS centres each line's glyph run (ascent + descent) in its line box. The
+  // TextView already advances lines by the line-height (applyLineHeight) but
+  // starts every run at the top of its box, so the block moves by the
+  // half-leading: down when the line box is taller than the font's natural
+  // line, up -- glyphs spilling out of the box, as in a browser -- when shorter.
+  // A normal line-height is the natural line, which the engine measured the box
+  // with, so it needs none. Taken from the paint's metrics rather than tuned px
+  // offsets so it holds at any density and for any font.
+  private int halfLeading(TextView text, int lineHeight) {
+    if (lineHeight <= 0) return 0;
+    Paint.FontMetricsInt metrics = text.getPaint().getFontMetricsInt();
+    return Math.round((lineHeight - (metrics.descent - metrics.ascent)) / 2.0f);
   }
 
   private Typeface typefaceForFamily(String family) {
@@ -2469,7 +2473,9 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
     private final Rect parentBounds = new Rect();
     private final Rect childBounds = new Rect();
     private boolean boundedTextWidth = true;
-    private int visualTextShiftY = 0;
+    private int lineGravity = Gravity.LEFT;
+    // Half-leading, positive down (see halfLeading).
+    private int lineShiftY = 0;
 
     TextNodeView(Context context) {
       super(context);
@@ -2487,10 +2493,21 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
       requestLayout();
     }
 
-    void setVisualTextShiftY(int shiftY) {
-      int next = Math.max(0, shiftY);
-      if (visualTextShiftY == next) return;
-      visualTextShiftY = next;
+    // The horizontal text-align. A single line is measured at its natural width,
+    // so the TextView's own gravity has no room to act on it: the line itself is
+    // placed in the box instead (onLayout).
+    void setLineGravity(int horizontalGravity) {
+      if (lineGravity == horizontalGravity) return;
+      lineGravity = horizontalGravity;
+      requestLayout();
+    }
+
+    // Either direction: a line box shorter than the font's natural line lifts the
+    // glyphs above the box. Nothing between here and an overflow box clips them
+    // (clipChildren stays off), matching a browser's visible ink overflow.
+    void setLineShiftY(int shiftY) {
+      if (lineShiftY == shiftY) return;
+      lineShiftY = shiftY;
       requestLayout();
     }
 
@@ -2508,10 +2525,12 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
 
     @Override
     protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-      FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) text.getLayoutParams();
       parentBounds.set(getPaddingLeft(), getPaddingTop(), right - left - getPaddingRight(), bottom - top - getPaddingBottom());
-      Gravity.apply(lp.gravity, text.getMeasuredWidth(), text.getMeasuredHeight(), parentBounds, childBounds);
-      text.layout(childBounds.left, childBounds.top - visualTextShiftY, childBounds.right, childBounds.bottom - visualTextShiftY);
+      // A line too long for its box is start-aligned whatever the text-align,
+      // overflowing the end edge (CSS Text, text-align).
+      int horizontal = text.getMeasuredWidth() <= parentBounds.width() ? lineGravity : Gravity.LEFT;
+      Gravity.apply(horizontal | Gravity.TOP, text.getMeasuredWidth(), text.getMeasuredHeight(), parentBounds, childBounds);
+      text.layout(childBounds.left, childBounds.top + lineShiftY, childBounds.right, childBounds.bottom + lineShiftY);
     }
 
     private static int childMeasureSpec(int parentSpec, int padding) {
