@@ -39,6 +39,7 @@ import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
@@ -1032,6 +1033,7 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
 
     applyTransform(view, nodes, base);
     applyBackgroundIfChanged(id, view, nodes, base);
+    applyOverflowClip(view, nodes, base);
     if (view instanceof TextNodeView) applyTextContainerPadding((TextNodeView) view, nodes, base);
 
     if (view instanceof ParagraphNodeView) {
@@ -1087,6 +1089,23 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
     input.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, Math.max(1, nodes[base + O_FONT_SIZE]));
     input.setTypeface(typefaceForFamily(fontFamily(nodes, texts, base), nodes[base + O_FONT_WEIGHT]));
     input.setGravity(textGravity(nodes, base));
+  }
+
+  // Any overflow but visible (hidden, clip, and an auto/scroll box whose content
+  // happens to fit) keeps a box's children inside it, as win32's clipsChildren
+  // does; a scroller always clips to its viewport. Neither ViewGroup switch can
+  // say that here: clipToPadding is skipped in dispatchDraw while the padding is
+  // all zero (containers carry none), and clipChildren is the parent's say over
+  // its children, which every container turns off so text ink can spill out of
+  // its box. Clipping to the view's own outline holds whatever the parent does,
+  // and a BOUNDS outline stays put while the content scrolls beneath it. Text
+  // and image nodes are not containers.
+  private void applyOverflowClip(View view, int[] nodes, int base) {
+    if (!(view instanceof FrameLayout) || view instanceof TextNodeView) return;
+    boolean clip = view instanceof ScrollNodeView || nodes[base + O_OVERFLOW] != 0;
+    if (view.getClipToOutline() == clip) return;
+    if (clip) view.setOutlineProvider(ViewOutlineProvider.BOUNDS);
+    view.setClipToOutline(clip);
   }
 
   private int fadedColor(int color, int alpha) {
@@ -1946,6 +1965,11 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
       setScaleType(ImageView.ScaleType.FIT_XY);
       setAdjustViewBounds(false);
       setClipToOutline(false);
+      // cover and none draw the bitmap larger than the box; CSS crops that at
+      // the content box. ImageView only clips its drawable when asked to, and
+      // the parent's clip (clipChildren) is off, so cover spilled out over the
+      // neighbouring layout.
+      setCropToPadding(true);
     }
 
     // object-fit. FIT_XY was hard-coded here, so every image stretched to its box
