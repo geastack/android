@@ -340,6 +340,26 @@ APP_DIR="$(node -e "const app = JSON.parse(process.argv[1]); process.stdout.writ
 APP_ENTRY="$(node -e "const app = JSON.parse(process.argv[1]); process.stdout.write(app.entry)" "$APP_JSON")"
 APP_RUNTIME="$(node -e "const app = JSON.parse(process.argv[1]); process.stdout.write(app.runtime)" "$APP_JSON")"
 APP_NAME="$(node -e "const app = JSON.parse(process.argv[1]); process.stdout.write(app.name || app.id)" "$APP_JSON")"
+# Logical CSS width the app's stylesheets were authored against, 0 when it
+# declares none. The view turns it into a device pixel ratio at runtime, once it
+# knows the real surface width. The published CLI's `inspect` does not report
+# the field yet, so fall back to the app's own package.json `gea.designWidth`
+# (as build-windows.mjs does); without it the layout would render at panel
+# density instead of filling the width.
+APP_DESIGN_WIDTH="$(node -e "
+const fs = require('fs')
+const path = require('path')
+const app = JSON.parse(process.argv[1])
+let width = Number(app.designWidth || 0)
+if (!(width > 0)) {
+  try {
+    width = Number(JSON.parse(fs.readFileSync(path.join(app.root, 'package.json'), 'utf8')).gea?.designWidth || 0)
+  } catch {
+    width = 0
+  }
+}
+process.stdout.write(String(width > 0 ? width : 0))
+" "$APP_JSON")"
 
 if [ "$APP_RUNTIME" != "gea" ]; then
   echo "ERROR: Android target only supports runtime=gea apps for now: $APP_ID is runtime=$APP_RUNTIME" >&2
@@ -377,7 +397,14 @@ MIN_SDK="${GEA_ANDROID_MIN_SDK:-23}"
 TARGET_SDK="${ANDROID_PLATFORM_DIR##*-}"
 ABI="${GEA_ANDROID_ABI:-arm64-v8a}"
 ORIENTATION="${GEA_ANDROID_SCREEN_ORIENTATION:-portrait}"
-DEVICE_PIXEL_RATIO="${GEA_ANDROID_DEVICE_PIXEL_RATIO:-1.5}"
+# An app that declares a design width derives its ratio from the real surface
+# width, so the baked-in default has to step aside (0 = "let the view decide").
+# The env var still wins over both, for layout debugging on a specific device.
+if [ "$APP_DESIGN_WIDTH" != "0" ]; then
+  DEVICE_PIXEL_RATIO="${GEA_ANDROID_DEVICE_PIXEL_RATIO:-0}"
+else
+  DEVICE_PIXEL_RATIO="${GEA_ANDROID_DEVICE_PIXEL_RATIO:-1.5}"
+fi
 BUILD_DIR="$ANDROID_DIR/build/$APP_ID"
 DIST_DIR="$ANDROID_DIR/dist/$APP_ID"
 GENERATED_DIR="$BUILD_DIR/generated"
@@ -524,6 +551,7 @@ for template in MainActivity.java GeaNativeBridge.java GeaNativeView.java GeaNat
   sed \
     -e "s/@PACKAGE@/$PACKAGE_NAME/g" \
     -e "s/@DEVICE_PIXEL_RATIO@/$DEVICE_PIXEL_RATIO/g" \
+    -e "s/@DESIGN_WIDTH@/$APP_DESIGN_WIDTH/g" \
     -e "s/@DEBUG_VIEW_BOUNDS@/$DEBUG_VIEW_BOUNDS/g" \
     "$NATIVE_TEMPLATE_DIR/$template.in" > "$JAVA_SRC_DIR/$PACKAGE_PATH/$template"
 done

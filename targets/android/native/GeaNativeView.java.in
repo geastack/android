@@ -39,6 +39,7 @@ import android.view.VelocityTracker;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputMethodManager;
 import android.widget.EditText;
@@ -54,8 +55,9 @@ import java.util.Map;
 import java.util.Set;
 
 public final class GeaNativeView extends FrameLayout implements Choreographer.FrameCallback {
-  private static final int FIELDS = 88;
+  private static final int FIELDS = 89;
   private static final float CONFIGURED_DEVICE_PIXEL_RATIO = @DEVICE_PIXEL_RATIO@f;
+  private static final float DESIGN_WIDTH = @DESIGN_WIDTH@f;
   private static final boolean DEBUG_VIEW_BOUNDS = @DEBUG_VIEW_BOUNDS@;
   private static final int DISPLAY_NONE = 1;
   private static final int DISPLAY_FLEX = 3;
@@ -154,10 +156,10 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
   private static final int O_PADDING_BOTTOM = 85;
   private static final int O_PADDING_LEFT = 86;
   private static final int O_FONT_WEIGHT = 87;
+  private static final int O_IMAGE_FIT = 88;
   private static final int TAG_P = tagHash("p");
   private static final int TAG_INPUT = tagHash("input");
   private static final int MAX_TOUCH_SLOTS = 10;
-  private static final int NATIVE_SCROLL_TOUCH_SLOP = 8;
   private static final float NATIVE_SCROLL_FLING_BOOST = 1.35f;
 
   private final Map<Integer, View> views = new HashMap<>();
@@ -189,6 +191,7 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
   private boolean nativeScrollStarted;
   private final OverScroller nativeScrollFling;
   private final Runnable nativeScrollFlingStep;
+  private final int nativeScrollTouchSlop;
   private final int nativeScrollMinimumFlingVelocity;
   private final int nativeScrollMaximumFlingVelocity;
   private VelocityTracker nativeScrollVelocityTracker;
@@ -208,6 +211,11 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
     super(context);
     nativeScrollFling = new OverScroller(context);
     ViewConfiguration viewConfig = ViewConfiguration.get(context);
+    // How far a finger may wander before a press on a scroller becomes a drag.
+    // A fixed 8 raw px was ~2 CSS px on a 1080-wide phone, so the jitter of an
+    // ordinary tap on a rail's chip turned into a pan and lost its click. The
+    // platform's slop is sized to a fingertip on this panel.
+    nativeScrollTouchSlop = viewConfig.getScaledTouchSlop();
     nativeScrollMinimumFlingVelocity = viewConfig.getScaledMinimumFlingVelocity();
     nativeScrollMaximumFlingVelocity = viewConfig.getScaledMaximumFlingVelocity();
     nativeScrollFlingStep = new Runnable() {
@@ -323,11 +331,15 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
           if (nativeScrollAxis == 0) {
             int totalDx = x - nativeScrollStartX;
             int totalDy = y - nativeScrollStartY;
-            if (Math.abs(totalDx) > NATIVE_SCROLL_TOUCH_SLOP || Math.abs(totalDy) > NATIVE_SCROLL_TOUCH_SLOP) {
+            if (Math.abs(totalDx) > nativeScrollTouchSlop || Math.abs(totalDy) > nativeScrollTouchSlop) {
               boolean canScrollX = nativeScrollTouchTarget.canScrollX();
               boolean canScrollY = nativeScrollTouchTarget.canScrollY();
-              if (canScrollX && (!canScrollY || Math.abs(totalDx) >= Math.abs(totalDy))) nativeScrollAxis = 1;
+              // Only a mostly sideways travel pans sideways, even on a rail that
+              // scrolls no other way: a vertical swipe that happens to start on
+              // one is not the rail's, so it goes back to the engine unclaimed.
+              if (canScrollX && Math.abs(totalDx) >= Math.abs(totalDy)) nativeScrollAxis = 1;
               else if (canScrollY) nativeScrollAxis = 2;
+              else resetNativeScrollTouch();
             }
           }
           boolean changed = false;
@@ -712,6 +724,12 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
 
   private float devicePixelRatio() {
     if (CONFIGURED_DEVICE_PIXEL_RATIO > 0.0f) return CONFIGURED_DEVICE_PIXEL_RATIO;
+    // An app that declares a design width was laid out in those logical px, so
+    // scale it to fill this surface instead of following the panel's density:
+    // the engine multiplies every CSS px by the ratio we report. Recomputed per
+    // frame, so a surface resize reflows (ensureInitialized picks up the change).
+    int width = getWidth();
+    if (DESIGN_WIDTH > 0.0f && width > 0) return width / DESIGN_WIDTH;
     float density = getResources().getDisplayMetrics().density;
     return density > 0.0f ? density : 1.0f;
   }
@@ -832,6 +850,18 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
       if (parentBase >= 0) {
         parentX = nodes[parentBase + O_X];
         parentY = nodes[parentBase + O_Y];
+      }
+      // The engine has already moved a scroller's children by its offset
+      // (resolveAbsoluteCoords subtracts scroll_x/scroll_y), and the ScrollView
+      // moves its content by it again (place -> setNativeScroll). Undo the
+      // engine's share so the children sit in the content's unscrolled space and
+      // only the native scroll moves them: content then tracks the finger 1:1,
+      // what is drawn is what the engine hit-tests, and a scroll step no longer
+      // re-lays-out every child. The offset the ScrollView actually took is used,
+      // so one it had to clamp still draws where the engine placed the children.
+      if (parentView instanceof ScrollNodeView) {
+        parentX -= parentView.getScrollX();
+        parentY -= parentView.getScrollY();
       }
     }
     if (view.getParent() != parent) {
@@ -1003,6 +1033,7 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
 
     applyTransform(view, nodes, base);
     applyBackgroundIfChanged(id, view, nodes, base);
+    applyOverflowClip(view, nodes, base);
     if (view instanceof TextNodeView) applyTextContainerPadding((TextNodeView) view, nodes, base);
 
     if (view instanceof ParagraphNodeView) {
@@ -1010,6 +1041,7 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
     } else if (view instanceof EditTextNodeView) {
       applyEditTextProps((EditTextNodeView) view, nodes, texts, base);
     } else if (view instanceof ImageNodeView) {
+      ((ImageNodeView) view).setImageFit(nodes[base + O_IMAGE_FIT]);
       ((ImageNodeView) view).setImageId(nodes[base + O_IMAGE_ID], imageBitmaps);
       view.setContentDescription("gea-image:" + id + ":" + nodes[base + O_IMAGE_ID]);
     } else {
@@ -1027,12 +1059,14 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
         setTypefaceIfChanged(text, typefaceForFamily(fontFamily, nodes[base + O_FONT_WEIGHT]));
         applyLineHeight(text, nodes[base + O_LINE_HEIGHT]);
         boolean boundedWidth = applyTextWrapping(text, nodes, base);
+        int gravity = textGravity(nodes, base);
         if (view instanceof TextNodeView) {
           TextNodeView textNode = (TextNodeView) view;
           textNode.setBoundedTextWidth(boundedWidth);
-          textNode.setVisualTextShiftY(visualTextShiftY(fontSize, nodes[base + O_LINE_HEIGHT], displayValue));
+          textNode.setLineGravity(gravity & Gravity.HORIZONTAL_GRAVITY_MASK);
+          textNode.setLineShiftY(halfLeading(text, nodes[base + O_LINE_HEIGHT]));
         }
-        setGravityIfChanged(text, textGravity(nodes, base));
+        setGravityIfChanged(text, gravity);
       }
     }
 
@@ -1057,6 +1091,23 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
     input.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, Math.max(1, nodes[base + O_FONT_SIZE]));
     input.setTypeface(typefaceForFamily(fontFamily(nodes, texts, base), nodes[base + O_FONT_WEIGHT]));
     input.setGravity(textGravity(nodes, base));
+  }
+
+  // Any overflow but visible (hidden, clip, and an auto/scroll box whose content
+  // happens to fit) keeps a box's children inside it, as win32's clipsChildren
+  // does; a scroller always clips to its viewport. Neither ViewGroup switch can
+  // say that here: clipToPadding is skipped in dispatchDraw while the padding is
+  // all zero (containers carry none), and clipChildren is the parent's say over
+  // its children, which every container turns off so text ink can spill out of
+  // its box. Clipping to the view's own outline holds whatever the parent does,
+  // and a BOUNDS outline stays put while the content scrolls beneath it. Text
+  // and image nodes are not containers.
+  private void applyOverflowClip(View view, int[] nodes, int base) {
+    if (!(view instanceof FrameLayout) || view instanceof TextNodeView) return;
+    boolean clip = view instanceof ScrollNodeView || nodes[base + O_OVERFLOW] != 0;
+    if (view.getClipToOutline() == clip) return;
+    if (clip) view.setOutlineProvider(ViewOutlineProvider.BOUNDS);
+    view.setClipToOutline(clip);
   }
 
   private int fadedColor(int color, int alpha) {
@@ -1468,16 +1519,18 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
     text.setLineSpacing(target - fontHeight, 1.0f);
   }
 
-  private int visualTextShiftY(int fontSize, int lineHeight, String value) {
-    int size = Math.max(1, fontSize);
-    int targetLineHeight = Math.max(0, lineHeight);
-    int compressed = targetLineHeight > 0 ? Math.max(0, size - targetLineHeight) : 0;
-    int shift = Math.round(size * 0.38f - 5.0f + compressed / 3.0f);
-    if (shift <= 0) return 0;
-    if (size < 18) return Math.min(shift, 1);
-    if (size < 24) return Math.min(shift, 4);
-    if ("°".equals(value) && size <= 30) return shift + 5;
-    return shift;
+  // CSS centres each line's glyph run (ascent + descent) in its line box. The
+  // TextView already advances lines by the line-height (applyLineHeight) but
+  // starts every run at the top of its box, so the block moves by the
+  // half-leading: down when the line box is taller than the font's natural
+  // line, up -- glyphs spilling out of the box, as in a browser -- when shorter.
+  // A normal line-height is the natural line, which the engine measured the box
+  // with, so it needs none. Taken from the paint's metrics rather than tuned px
+  // offsets so it holds at any density and for any font.
+  private int halfLeading(TextView text, int lineHeight) {
+    if (lineHeight <= 0) return 0;
+    Paint.FontMetricsInt metrics = text.getPaint().getFontMetricsInt();
+    return Math.round((lineHeight - (metrics.descent - metrics.ascent)) / 2.0f);
   }
 
   private Typeface typefaceForFamily(String family) {
@@ -1916,6 +1969,27 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
       setScaleType(ImageView.ScaleType.FIT_XY);
       setAdjustViewBounds(false);
       setClipToOutline(false);
+      // cover and none draw the bitmap larger than the box; CSS crops that at
+      // the content box. ImageView only clips its drawable when asked to, and
+      // the parent's clip (clipChildren) is off, so cover spilled out over the
+      // neighbouring layout.
+      setCropToPadding(true);
+    }
+
+    // object-fit. FIT_XY was hard-coded here, so every image stretched to its box
+    // regardless of what the CSS asked for — weather's forecast icons are square
+    // in a 24x20 slot and came out 20% too wide. ImageView has no scale-down, so
+    // that value takes the nearest honest behaviour, FIT_CENTER.
+    void setImageFit(int fit) {
+      final ImageView.ScaleType scaleType;
+      switch (fit) {
+        case 1: scaleType = ImageView.ScaleType.FIT_CENTER; break;   // contain
+        case 2: scaleType = ImageView.ScaleType.CENTER_CROP; break;  // cover
+        case 3: scaleType = ImageView.ScaleType.CENTER; break;       // none
+        case 4: scaleType = ImageView.ScaleType.FIT_CENTER; break;   // scale-down
+        default: scaleType = ImageView.ScaleType.FIT_XY;             // fill
+      }
+      if (getScaleType() != scaleType) setScaleType(scaleType);
     }
 
     void setImageId(int imageId, Map<Integer, Bitmap> cache) {
@@ -2399,7 +2473,9 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
     private final Rect parentBounds = new Rect();
     private final Rect childBounds = new Rect();
     private boolean boundedTextWidth = true;
-    private int visualTextShiftY = 0;
+    private int lineGravity = Gravity.LEFT;
+    // Half-leading, positive down (see halfLeading).
+    private int lineShiftY = 0;
 
     TextNodeView(Context context) {
       super(context);
@@ -2417,10 +2493,21 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
       requestLayout();
     }
 
-    void setVisualTextShiftY(int shiftY) {
-      int next = Math.max(0, shiftY);
-      if (visualTextShiftY == next) return;
-      visualTextShiftY = next;
+    // The horizontal text-align. A single line is measured at its natural width,
+    // so the TextView's own gravity has no room to act on it: the line itself is
+    // placed in the box instead (onLayout).
+    void setLineGravity(int horizontalGravity) {
+      if (lineGravity == horizontalGravity) return;
+      lineGravity = horizontalGravity;
+      requestLayout();
+    }
+
+    // Either direction: a line box shorter than the font's natural line lifts the
+    // glyphs above the box. Nothing between here and an overflow box clips them
+    // (clipChildren stays off), matching a browser's visible ink overflow.
+    void setLineShiftY(int shiftY) {
+      if (lineShiftY == shiftY) return;
+      lineShiftY = shiftY;
       requestLayout();
     }
 
@@ -2438,10 +2525,12 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
 
     @Override
     protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
-      FrameLayout.LayoutParams lp = (FrameLayout.LayoutParams) text.getLayoutParams();
       parentBounds.set(getPaddingLeft(), getPaddingTop(), right - left - getPaddingRight(), bottom - top - getPaddingBottom());
-      Gravity.apply(lp.gravity, text.getMeasuredWidth(), text.getMeasuredHeight(), parentBounds, childBounds);
-      text.layout(childBounds.left, childBounds.top - visualTextShiftY, childBounds.right, childBounds.bottom - visualTextShiftY);
+      // A line too long for its box is start-aligned whatever the text-align,
+      // overflowing the end edge (CSS Text, text-align).
+      int horizontal = text.getMeasuredWidth() <= parentBounds.width() ? lineGravity : Gravity.LEFT;
+      Gravity.apply(horizontal | Gravity.TOP, text.getMeasuredWidth(), text.getMeasuredHeight(), parentBounds, childBounds);
+      text.layout(childBounds.left, childBounds.top + lineShiftY, childBounds.right, childBounds.bottom + lineShiftY);
     }
 
     private static int childMeasureSpec(int parentSpec, int padding) {
