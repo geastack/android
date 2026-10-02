@@ -195,6 +195,8 @@ void AudioSystem::setVolume(int v)
 bool AudioSystem::playFile(const std::string &) { return false; }
 bool AudioSystem::playPcm(const std::int16_t *, std::size_t, int, int) { return false; }
 void AudioSystem::stopPlayback() {}
+// Nothing is ever queued for playback here (playPcm refuses), so there is nothing to flush.
+void AudioSystem::flushPlayback() {}
 
 }  // namespace gea::platform::audio
 
