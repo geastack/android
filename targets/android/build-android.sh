@@ -3,15 +3,38 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 ANDROID_DIR="$ROOT_DIR/targets/android"
-# Packages come from this repo's own node_modules, the way node resolves them.
-resolve_package() { node -e "process.stdout.write(require('fs').realpathSync('$ROOT_DIR/node_modules/$1'))" 2>/dev/null || true; }
+# The app project is the directory this script runs in. Packages resolve from
+# it the way node resolves them (first from the project, then from the package
+# named as the second argument, for dependencies that npm did not hoist).
+resolve_package() {
+  node -e '
+    const path = require("path")
+    const { createRequire } = require("module")
+    for (const base of process.argv.slice(2)) {
+      if (!base) continue
+      try {
+        const resolved = createRequire(path.join(base, "package.json")).resolve(process.argv[1] + "/package.json")
+        process.stdout.write(require("fs").realpathSync(path.dirname(resolved)))
+        process.exit(0)
+      } catch {}
+    }
+  ' "$1" "$(pwd -P)" "${2:-}" 2>/dev/null || true
+}
 GEA_CORE_DIR="${GEA_CORE_DIR:-$(resolve_package @geastack/core)}"
-GEA_COMPILER_DIR="${GEA_COMPILER_DIR:-$(resolve_package @geastack/compiler)}"
-GEA_CLI_BIN="${GEA_CLI_BIN:-$(resolve_package @geastack/cli)/bin/gea.mjs}"
+GEA_COMPILER_DIR="${GEA_COMPILER_DIR:-$(resolve_package @geastack/compiler "$GEA_CORE_DIR")}"
+if [ -z "${GEA_CLI_BIN:-}" ]; then
+  GEA_CLI_DIR="$(resolve_package @geastack/cli)"
+  GEA_CLI_BIN="${GEA_CLI_DIR:+$GEA_CLI_DIR/bin/gea.mjs}"
+fi
 for _pair in "@geastack/core:$GEA_CORE_DIR" "@geastack/compiler:$GEA_COMPILER_DIR" "@geastack/cli:$GEA_CLI_BIN"; do
-  [ -e "${_pair#*:}" ] || { echo "Cannot resolve ${_pair%%:*} — run \`npm install\` in $ROOT_DIR" >&2; exit 1; }
+  [ -n "${_pair#*:}" ] && [ -e "${_pair#*:}" ] || { echo "Cannot resolve ${_pair%%:*} from $(pwd -P) — run this script from the app project, after installing the packages listed in the @geastack/android README" >&2; exit 1; }
 done
-ANDROID_SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Library/Android/sdk}}"
+ANDROID_SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+if [ -z "$ANDROID_SDK" ]; then
+  # Android Studio's default SDK location on macOS, then on Linux.
+  ANDROID_SDK="$HOME/Library/Android/sdk"
+  [ -d "$ANDROID_SDK" ] || [ ! -d "$HOME/Android/Sdk" ] || ANDROID_SDK="$HOME/Android/Sdk"
+fi
 if [ -n "${GEA_ANDROID_ADB:-}" ]; then
   ADB="$GEA_ANDROID_ADB"
 elif [ -x "$ANDROID_SDK/platform-tools/adb" ]; then
@@ -378,8 +401,9 @@ TARGET_SDK="${ANDROID_PLATFORM_DIR##*-}"
 ABI="${GEA_ANDROID_ABI:-arm64-v8a}"
 ORIENTATION="${GEA_ANDROID_SCREEN_ORIENTATION:-portrait}"
 DEVICE_PIXEL_RATIO="${GEA_ANDROID_DEVICE_PIXEL_RATIO:-1.5}"
-BUILD_DIR="$ANDROID_DIR/build/$APP_ID"
-DIST_DIR="$ANDROID_DIR/dist/$APP_ID"
+OUTPUT_ROOT="${GEA_ANDROID_OUTPUT_DIR:-$APP_DIR/dist/android}"
+DIST_DIR="$OUTPUT_ROOT/$APP_ID"
+BUILD_DIR="$DIST_DIR/build"
 GENERATED_DIR="$BUILD_DIR/generated"
 ANDROID_BUILD_DIR="$BUILD_DIR/android"
 NATIVE_BUILD_DIR="$BUILD_DIR/native-build"
@@ -426,10 +450,15 @@ fi
 export GEA_CORE="$GEA_CORE_DIR"
 # gea_sources.mjs resolves every framework package from these (see the
 # manifest's header); default them to the collection layout like build-macos.sh.
-GEA_HOST_DIR="${GEA_HOST_DIR:-$GEA_CORE_DIR/../host}"
-GEA_ENGINE_DIR="${GEA_ENGINE_DIR:-$GEA_CORE_DIR/../engine}"
-GEA_ELEMENTS_DIR="${GEA_ELEMENTS_DIR:-$GEA_CORE_DIR/../elements}"
-GEA_GEAOS_PACKAGE_DIR="${GEA_GEAOS_PACKAGE_DIR:-$GEA_CORE_DIR/../geaos}"
+resolve_framework_package() {
+  local resolved
+  resolved="$(resolve_package "@geastack/$1" "$GEA_CORE_DIR")"
+  printf '%s\n' "${resolved:-$GEA_CORE_DIR/../$1}"
+}
+GEA_HOST_DIR="${GEA_HOST_DIR:-$(resolve_framework_package host)}"
+GEA_ENGINE_DIR="${GEA_ENGINE_DIR:-$(resolve_framework_package engine)}"
+GEA_ELEMENTS_DIR="${GEA_ELEMENTS_DIR:-$(resolve_framework_package elements)}"
+GEA_GEAOS_PACKAGE_DIR="${GEA_GEAOS_PACKAGE_DIR:-$(resolve_framework_package geaos)}"
 export GEA_HOST_DIR GEA_ENGINE_DIR GEA_ELEMENTS_DIR GEA_GEAOS_PACKAGE_DIR
 # shellcheck source=/dev/null
 source "$GEA_CORE_DIR/gea_sources.sh"
@@ -721,7 +750,7 @@ cp "$NATIVE_BUILD_DIR/cmake/libgea_android.so" "$LIBS_DIR/$ABI/libgea_android.so
 
 WEBKIT_PATTERN='android\.web''kit\.'
 BROWSER_VIEW_PATTERN='Web''View'
-if rg -n "${WEBKIT_PATTERN}${BROWSER_VIEW_PATTERN}|${BROWSER_VIEW_PATTERN}" "$JAVA_SRC_DIR" "$NATIVE_TEMPLATE_DIR" >/dev/null; then
+if grep -rqE "${WEBKIT_PATTERN}${BROWSER_VIEW_PATTERN}|${BROWSER_VIEW_PATTERN}" "$JAVA_SRC_DIR" "$NATIVE_TEMPLATE_DIR"; then
   echo "ERROR: Android native target must not reference browser-backed views." >&2
   exit 1
 fi
