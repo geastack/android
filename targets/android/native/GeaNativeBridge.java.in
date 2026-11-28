@@ -50,6 +50,8 @@ final class GeaNativeBridge {
     applicationContext = context != null ? context.getApplicationContext() : null;
   }
 
+  static Context applicationContext() { return applicationContext; }
+
   static boolean networkConnectedForNative() {
     Context context = applicationContext;
     if (context == null) return true;

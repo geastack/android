@@ -1,0 +1,154 @@
+#include "android_services.h"
+#include "audio.h"
+#include "host/media.h"
+#include "host/websocket_platform.h"
+
+namespace {
+JavaVM *vm;
+jclass captureClass;
+jclass socketClass;
+jmethodID captureTrack;
+jmethodID socketOpen, socketSend, socketClose, socketBuffered;
+}
+
+namespace gea::android {
+JniEnv::JniEnv() {
+  if (!vm) return;
+  if (vm->GetEnv(reinterpret_cast<void **>(&env_), JNI_VERSION_1_6) == JNI_EDETACHED)
+    attached_ = vm->AttachCurrentThread(&env_, nullptr) == JNI_OK;
+}
+
+JniEnv::~JniEnv() {
+  if (attached_) vm->DetachCurrentThread();
+}
+
+jclass findAppClass(JNIEnv *env, const char *name) {
+  return env->FindClass((std::string("@PACKAGE_PATH@/") + name).c_str());
+}
+
+jbyteArray utf8Bytes(JNIEnv *env, const std::string &text) {
+  auto bytes = env->NewByteArray(static_cast<jsize>(text.size()));
+  if (bytes && !text.empty())
+    env->SetByteArrayRegion(bytes, 0, static_cast<jsize>(text.size()), reinterpret_cast<const jbyte *>(text.data()));
+  return bytes;
+}
+
+std::string fromUtf8Bytes(JNIEnv *env, jbyteArray bytes) {
+  if (!bytes) return {};
+  std::string text(env->GetArrayLength(bytes), '\0');
+  if (!text.empty()) env->GetByteArrayRegion(bytes, 0, static_cast<jsize>(text.size()), reinterpret_cast<jbyte *>(text.data()));
+  return text;
+}
+
+static bool send(host::NativeWebSocketHandle handle, const std::string &text, jboolean binary) {
+  JniEnv jni;
+  auto *env = jni.get();
+  if (!env || !socketClass) return false;
+  auto bytes = utf8Bytes(env, text);
+  auto sent = bytes && env->CallStaticBooleanMethod(socketClass, socketSend, static_cast<jlong>(handle), bytes, binary);
+  env->DeleteLocalRef(bytes);
+  return sent;
+}
+
+bool sendBinaryBase64(const host::WebSocket &socket, const std::string &text) {
+  return send(socket.nativeHandle, text, JNI_TRUE);
+}
+}
+
+void gea_android_init_http(JNIEnv *env);
+
+void gea_android_init_services(JNIEnv *env) {
+  if (vm) return;
+  env->GetJavaVM(&vm);
+  auto capture = gea::android::findAppClass(env, "GeaNativeCapture");
+  captureClass = static_cast<jclass>(env->NewGlobalRef(capture));
+  captureTrack = env->GetStaticMethodID(capture, "track", "(JZI)V");
+  env->DeleteLocalRef(capture);
+  auto socket = gea::android::findAppClass(env, "GeaNativeWebSocket");
+  socketClass = static_cast<jclass>(env->NewGlobalRef(socket));
+  socketOpen = env->GetStaticMethodID(socket, "open", "(JLjava/lang/String;Ljava/lang/String;Ljava/lang/String;)V");
+  socketSend = env->GetStaticMethodID(socket, "send", "(J[BZ)Z");
+  socketClose = env->GetStaticMethodID(socket, "close", "(JZ)V");
+  socketBuffered = env->GetStaticMethodID(socket, "buffered", "(J)J");
+  env->DeleteLocalRef(socket);
+  gea_android_init_http(env);
+}
+
+namespace gea::host::media {
+static void platform_track(NativeMediaTrackHandle handle, jboolean enabled) {
+  android::JniEnv jni;
+  if (auto *env = jni.get(); env && captureClass)
+    env->CallStaticVoidMethod(captureClass, captureTrack, static_cast<jlong>(handle), enabled, platform::audio::deviceSampleRate);
+}
+void platform_attach_track(NativeMediaTrackHandle handle) { platform_track(handle, JNI_TRUE); }
+void platform_detach_track(NativeMediaTrackHandle handle) { platform_track(handle, JNI_FALSE); }
+}
+
+extern "C" JNIEXPORT void JNICALL Java_@JNI_PREFIX@_GeaNativeCapture_samples(JNIEnv *env, jclass, jlong track, jshortArray samples, jint count) {
+  auto *data = env->GetShortArrayElements(samples, nullptr);
+  if (!data) return;
+  gea::host::media::track_inject_pcm(track, data, count);
+  env->ReleaseShortArrayElements(samples, data, JNI_ABORT);
+}
+
+namespace gea::host::websocket {
+void platform_open(NativeWebSocketHandle handle, const std::string &url, const std::string &protocols, const std::string &headers) {
+  android::JniEnv jni;
+  auto *env = jni.get();
+  if (!env || !socketClass) {
+    transport_error(handle, "Android WebSocket unavailable");
+    transport_close(handle, 1006, "");
+    return;
+  }
+  auto jUrl = env->NewStringUTF(url.c_str());
+  auto jProtocols = env->NewStringUTF(protocols.c_str());
+  auto jHeaders = env->NewStringUTF(headers.c_str());
+  env->CallStaticVoidMethod(socketClass, socketOpen, static_cast<jlong>(handle), jUrl, jProtocols, jHeaders);
+  env->DeleteLocalRef(jHeaders);
+  env->DeleteLocalRef(jProtocols);
+  env->DeleteLocalRef(jUrl);
+}
+
+std::size_t platform_buffered(NativeWebSocketHandle handle) {
+  android::JniEnv jni;
+  auto *env = jni.get();
+  return env && socketClass ? env->CallStaticLongMethod(socketClass, socketBuffered, static_cast<jlong>(handle)) : 0;
+}
+
+void platform_send(NativeWebSocketHandle handle, const std::string &data) {
+  android::send(handle, data, JNI_FALSE);
+}
+
+static void close(NativeWebSocketHandle handle, jboolean destroy) {
+  android::JniEnv jni;
+  if (auto *env = jni.get(); env && socketClass)
+    env->CallStaticVoidMethod(socketClass, socketClose, static_cast<jlong>(handle), destroy);
+}
+
+void platform_close(NativeWebSocketHandle handle) {
+  transport_closing(handle);
+  close(handle, JNI_FALSE);
+}
+
+void platform_destroy(NativeWebSocketHandle handle) { close(handle, JNI_TRUE); }
+}
+
+extern "C" JNIEXPORT jboolean JNICALL Java_@JNI_PREFIX@_GeaNativeWebSocket_opened(JNIEnv *, jclass, jlong handle) {
+  return gea::host::websocket::transport_open(handle);
+}
+
+extern "C" JNIEXPORT void JNICALL Java_@JNI_PREFIX@_GeaNativeWebSocket_message(JNIEnv *env, jclass, jlong handle, jbyteArray text) {
+  gea::host::websocket::transport_message(handle, gea::android::fromUtf8Bytes(env, text));
+}
+
+extern "C" JNIEXPORT void JNICALL Java_@JNI_PREFIX@_GeaNativeWebSocket_closing(JNIEnv *, jclass, jlong handle) {
+  gea::host::websocket::transport_closing(handle);
+}
+
+extern "C" JNIEXPORT void JNICALL Java_@JNI_PREFIX@_GeaNativeWebSocket_closed(JNIEnv *env, jclass, jlong handle, jint code, jbyteArray reason) {
+  gea::host::websocket::transport_close(handle, code, gea::android::fromUtf8Bytes(env, reason));
+}
+
+extern "C" JNIEXPORT void JNICALL Java_@JNI_PREFIX@_GeaNativeWebSocket_failed(JNIEnv *env, jclass, jlong handle, jbyteArray reason) {
+  gea::host::websocket::transport_error(handle, gea::android::fromUtf8Bytes(env, reason));
+}

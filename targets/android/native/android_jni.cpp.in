@@ -37,6 +37,8 @@ extern "C" int gea_android_display_blit_to_surface();
 extern "C" void gea_android_audio_set_bridge_class(JNIEnv *env, jclass bridgeClass);
 extern "C" void gea_android_network_set_bridge_class(JNIEnv *env, jclass bridgeClass);
 
+void gea_android_init_services(JNIEnv *env);
+
 namespace gea::platform::touch {
 extern "C" void gea_android_touch_set_state(bool touching, int x, int y);
 }
@@ -159,9 +161,8 @@ void runPendingNativeWork(int timestampMs)
 		clock_gettime(CLOCK_MONOTONIC, &t0);
 		gea::framework::app::Application::frame(timestampMs);
 		clock_gettime(CLOCK_MONOTONIC, &t1);
-		// 1 Hz achieved-frame-rate log, mirror of the geaos [geaos.loop] perf line
-		// so the same app's fps can be compared across the two stacks straight
-		// from logcat. Counted here (not in a JNI entry point) because mounted-UI
+		// 1 Hz achieved-frame-rate log, readable straight from logcat.
+		// Counted here (not in a JNI entry point) because mounted-UI
 		// and native-canvas modes drive frames through different bridge calls.
 		static int s_fpsWindowStartMs = 0;
 		static int s_fpsFrames = 0;
@@ -321,7 +322,7 @@ int resolvedCircularBorderRadius(const gea::embedded::ui::Node &node)
 	return std::max(0, std::min(maxRadius, static_cast<int>(std::lround(minRadius))));
 }
 
-void ensureInitialized(int width, int height, float dpr)
+void ensureInitialized(JNIEnv *env, jclass bridgeClass, int width, int height, float dpr)
 {
 	if (width <= 0 || height <= 0) return;
 	if (g_initialized) {
@@ -330,6 +331,9 @@ void ensureInitialized(int width, int height, float dpr)
 		updateFrameNeed();
 		return;
 	}
+	gea_android_audio_set_bridge_class(env, bridgeClass);
+	gea_android_network_set_bridge_class(env, bridgeClass);
+	gea_android_init_services(env);
 	g_width = width;
 	g_height = height;
 	g_dpr = dpr > 0.0f ? dpr : 1.0f;
@@ -717,15 +721,13 @@ extern "C" bool gea_host_measure_text_with_style(const char *text,
 
 extern "C" JNIEXPORT void JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeInit(JNIEnv *env, jclass bridgeClass, jint width, jint height, jfloat dpr)
 {
-	gea_android_audio_set_bridge_class(env, bridgeClass);
-	gea_android_network_set_bridge_class(env, bridgeClass);
-	ensureInitialized(width, height, dpr);
+	ensureInitialized(env, bridgeClass, width, height, dpr);
 	updateFrameNeed();
 }
 
-extern "C" JNIEXPORT jintArray JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeFrame(JNIEnv *env, jclass, jint width, jint height, jfloat dpr, jlong frameTimeNanos)
+extern "C" JNIEXPORT jintArray JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeFrame(JNIEnv *env, jclass bridgeClass, jint width, jint height, jfloat dpr, jlong frameTimeNanos)
 {
-	ensureInitialized(width, height, dpr);
+	ensureInitialized(env, bridgeClass, width, height, dpr);
 	const int timestampMs = frameTimeNanos > 0
 	                            ? static_cast<int>(frameTimeNanos / 1000000LL)
 	                            : gea_embedded_now_ms();
@@ -733,15 +735,15 @@ extern "C" JNIEXPORT jintArray JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeF
 	return snapshot(env);
 }
 
-extern "C" JNIEXPORT jboolean JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeHasMountedRoot(JNIEnv *, jclass, jint width, jint height, jfloat dpr)
+extern "C" JNIEXPORT jboolean JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeHasMountedRoot(JNIEnv *env, jclass bridgeClass, jint width, jint height, jfloat dpr)
 {
-	ensureInitialized(width, height, dpr);
+	ensureInitialized(env, bridgeClass, width, height, dpr);
 	return gea::embedded::ui::Tree::instance().mountedRoot() >= 0 ? JNI_TRUE : JNI_FALSE;
 }
 
-extern "C" JNIEXPORT jintArray JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeDrawFrame(JNIEnv *env, jclass, jobject canvas, jint width, jint height, jfloat dpr, jlong frameTimeNanos)
+extern "C" JNIEXPORT jintArray JNICALL Java_@JNI_PREFIX@_GeaNativeBridge_nativeDrawFrame(JNIEnv *env, jclass bridgeClass, jobject canvas, jint width, jint height, jfloat dpr, jlong frameTimeNanos)
 {
-	ensureInitialized(width, height, dpr);
+	ensureInitialized(env, bridgeClass, width, height, dpr);
 	const int timestampMs = frameTimeNanos > 0
 	                            ? static_cast<int>(frameTimeNanos / 1000000LL)
 	                            : gea_embedded_now_ms();

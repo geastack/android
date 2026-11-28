@@ -176,6 +176,7 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
   private final Rect nativeInputHitRect = new Rect();
   private final Rect nativeScrollHitRect = new Rect();
   private static final Map<String, Typeface> measureTypefaces = new HashMap<>();
+  private static java.lang.ref.WeakReference<GeaNativeView> activeView = new java.lang.ref.WeakReference<>(null);
   private static Context appContext;
   private final int[] touchPointerIds = new int[MAX_TOUCH_SLOTS];
   private boolean nativeInputTouchActive;
@@ -206,6 +207,7 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
 
   public GeaNativeView(Context context) {
     super(context);
+    activeView = new java.lang.ref.WeakReference<>(this);
     nativeScrollFling = new OverScroller(context);
     ViewConfiguration viewConfig = ViewConfiguration.get(context);
     nativeScrollMinimumFlingVelocity = viewConfig.getScaledMinimumFlingVelocity();
@@ -832,6 +834,12 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
       if (parentBase >= 0) {
         parentX = nodes[parentBase + O_X];
         parentY = nodes[parentBase + O_Y];
+        // Engine positions already include scroll. The native ScrollView
+        // applies it again, so place its immediate children in content space.
+        if (parentView instanceof ScrollNodeView) {
+          parentX -= nodes[parentBase + O_SCROLL_X];
+          parentY -= nodes[parentBase + O_SCROLL_Y];
+        }
       }
     }
     if (view.getParent() != parent) {
@@ -1003,6 +1011,7 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
 
     applyTransform(view, nodes, base);
     applyBackgroundIfChanged(id, view, nodes, base);
+    applyOverflowClip(view, nodes, base, width, height);
     if (view instanceof TextNodeView) applyTextContainerPadding((TextNodeView) view, nodes, base);
 
     if (view instanceof ParagraphNodeView) {
@@ -1044,6 +1053,21 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
         }
   }
 
+  private void applyOverflowClip(View view, int[] nodes, int base, int width, int height) {
+    if (view instanceof ScrollNodeView) return;
+    Rect current = view.getClipBounds();
+    if (nodes[base + O_OVERFLOW] == 1) {
+      int clipWidth = Math.max(0, width);
+      int clipHeight = Math.max(0, height);
+      if (current == null || current.left != 0 || current.top != 0
+          || current.right != clipWidth || current.bottom != clipHeight) {
+        view.setClipBounds(new Rect(0, 0, clipWidth, clipHeight));
+      }
+    } else if (current != null) {
+      view.setClipBounds(null);
+    }
+  }
+
   private void applyEditTextProps(EditTextNodeView input, int[] nodes, String[] texts, int base) {
     int id = nodes[base + O_ID];
     String value = GeaNativeBridge.nativeAttribute(id, "value");
@@ -1056,7 +1080,7 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
     input.setHintTextColor(fadedColor(nodes[base + O_TEXT_COLOR], 178));
     input.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, Math.max(1, nodes[base + O_FONT_SIZE]));
     input.setTypeface(typefaceForFamily(fontFamily(nodes, texts, base), nodes[base + O_FONT_WEIGHT]));
-    input.setGravity(textGravity(nodes, base));
+    input.setGravity((textGravity(nodes, base) & Gravity.HORIZONTAL_GRAVITY_MASK) | Gravity.CENTER_VERTICAL);
   }
 
   private int fadedColor(int color, int alpha) {
@@ -1707,6 +1731,27 @@ public final class GeaNativeView extends FrameLayout implements Choreographer.Fr
     int hash = 0;
     for (int i = 0; i < tag.length(); i++) hash = hash * 31 + tag.charAt(i);
     return hash;
+  }
+
+  static TextView mountedTextView(int nodeId) {
+    GeaNativeView view = activeView.get();
+    return view == null ? null : view.textViewFor(view.views.get(nodeId));
+  }
+
+  static int mountedLineTop(int scrollNodeId, TextView text, int offset) {
+    GeaNativeView view = activeView.get();
+    if (view == null || !text.isLaidOut() || text.isLayoutRequested()) return -1;
+    View scroll = view.views.get(scrollNodeId);
+    Layout layout = text.getLayout();
+    if (!(scroll instanceof ScrollNodeView) || layout == null || offset < 0 || offset >= text.length()) return -1;
+    int top = text.getTotalPaddingTop() + layout.getLineTop(layout.getLineForOffset(offset));
+    View child = text;
+    while (child != scroll) {
+      if (!(child.getParent() instanceof View)) return -1;
+      top += child.getTop() - child.getScrollY();
+      child = (View) child.getParent();
+    }
+    return Math.max(0, top - scroll.getPaddingTop());
   }
 
   private TextView textViewFor(View view) {

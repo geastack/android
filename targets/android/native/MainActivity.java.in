@@ -36,6 +36,7 @@ public class MainActivity extends Activity {
   protected void onResume() {
     super.onResume();
     hideSystemUi();
+    GeaNativeCapture.resume(this);
     if (nativeView != null) {
       nativeView.requestFocus();
       nativeView.resume();
@@ -44,8 +45,17 @@ public class MainActivity extends Activity {
 
   @Override
   protected void onPause() {
+    GeaNativeCapture.pause();
     if (nativeView != null) nativeView.pause();
     super.onPause();
+  }
+
+  @Override
+  public void onRequestPermissionsResult(int request, String[] permissions, int[] grants) {
+    super.onRequestPermissionsResult(request, permissions, grants);
+    if (request == GeaNativeCapture.PERMISSION_REQUEST) {
+      GeaNativeCapture.permissionResult(grants.length > 0 && grants[0] == android.content.pm.PackageManager.PERMISSION_GRANTED);
+    }
   }
 
   @Override
