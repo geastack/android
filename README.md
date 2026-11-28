@@ -5,30 +5,23 @@ the NDK builds it into a native library, and each component node is rendered as
 a real Android view (`FrameLayout`, `TextView`, `ImageView`, `ScrollView`, ...)
 through JNI. There is no WebView and no JavaScript engine on the device.
 
-`gea build --target android` is not available (the CLI answers "The android
-build is not driven by gea"). The entry point is the package's
-`targets/android/build-android.sh`, run from the app project.
-
 ## Set up an app
 
-`@geastack/android` has no dependencies of its own. The app installs the
-packages the script needs next to it: the framework packages, the compiler
-(a dependency of `@geastack/core`) and the CLI.
+Declare `gea.targets.android` in the app's `package.json` and install the target alongside
+the framework packages and CLI.
 
 ```sh
 npm install --save-dev @geastack/android @geastack/core @geastack/host \
-  @geastack/engine @geastack/elements @geastack/geaos @geastack/cli
+  @geastack/engine @geastack/elements @geastack/cli
+gea build --target android
+gea run --target android
 ```
 
-From the app folder (the script resolves the packages and the app id from the
-current directory):
+Run these commands from the app folder. `build` signs an APK and `run` also installs
+and launches it. Pass `--serial <adb-serial>` to select a device when several
+are connected, or set `GEA_ANDROID_ROOT` to use a target source checkout.
 
-```sh
-bash node_modules/@geastack/android/targets/android/build-android.sh <app-id> build
-bash node_modules/@geastack/android/targets/android/build-android.sh <app-id> device --serial <adb-serial>
-```
-
-`<app-id>` is the `gea.id` in the app's `package.json`.
+The CLI invokes `targets/android/build-android.sh` with the app ID from `gea.id`.
 
 ## Modes and flags
 
@@ -56,9 +49,10 @@ app folder, with intermediate files in `dist/android/<app-id>/build/`.
   NDK and CMake (with its `ninja`) installed, found through `ANDROID_HOME` or
   `ANDROID_SDK_ROOT` (default `~/Library/Android/sdk` on macOS,
   `~/Android/Sdk` on Linux). The newest installed
-  version of each is used.
-- A JDK (`javac`, and `keytool` to create the debug keystore on first use).
-- `zip`, Node.js 22 or later (for `@geastack/cli`), and `adb` for the install,
+  version of each is used. Use NDK r30 or newer for compiler runtimes that require
+  C++20 `std::atomic_ref`.
+- JDK 11 or newer (`javac`, and `keytool` to create the debug keystore on first use).
+- `zip`, `curl` (fetches the Java transport libraries from Maven Central on the first build), Node.js 22 or later (for `@geastack/cli`), and `adb` for the install,
   launch, device and monitor modes.
 
 The target uses the Android SDK command-line tools directly (`aapt2`, `javac`,
@@ -80,10 +74,25 @@ Useful environment overrides:
   `GEA_ANDROID_KEY_PASS`: signing key (default: the Android debug keystore).
 - `GEA_ANDROID_DEBUG_VIEW_BOUNDS=1`: outline every native view's bounds.
 - `GEA_CORE_DIR`, `GEA_COMPILER_DIR`, `GEA_CLI_BIN`, `GEA_HOST_DIR`,
-  `GEA_ENGINE_DIR`, `GEA_ELEMENTS_DIR`, `GEA_GEAOS_PACKAGE_DIR`: use these
+  `GEA_ENGINE_DIR`, `GEA_ELEMENTS_DIR`: use these
   package copies instead of the ones installed in the app.
 
 The build fails if the generated Java or native sources reference a WebView.
+
+## Host services
+
+Audio-only `navigator.mediaDevices.getUserMedia` uses Android's runtime microphone
+permission and captures mono PCM with `AudioRecord`. Capture pauses while the
+activity is in the background. The WebSocket client supports text frames and
+the native host can queue binary audio frames using OkHttp. The HTTP server
+adapts requests from NanoHTTPD to the app's Gea HTTP handler.
+
+Android-specific C and C++ sources can be listed in `gea.targets.android.nativeSources`.
+The target also loads an optional `android/geatsc-native-plugin.mjs` and compiles
+optional `android/*.java` sources, replacing `@PACKAGE@` with the generated
+Java package name. Set `gea.targets.android.screenOrientation` for apps that
+require a specific activity orientation. Set `gea.targets.android.devicePixelRatio`
+to choose how CSS pixels map to display pixels.
 
 ## License
 

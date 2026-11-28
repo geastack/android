@@ -1,0 +1,115 @@
+#include "android_services.h"
+#include "host/http.h"
+
+#include <fstream>
+#include <utility>
+
+namespace {
+thread_local bool loopbackRequest = false;
+
+struct RequestPeer {
+  bool previous = loopbackRequest;
+  explicit RequestPeer(bool loopback) { loopbackRequest = loopback; }
+  ~RequestPeer() { loopbackRequest = previous; }
+};
+
+jclass serverClass;
+jclass replyClass;
+jclass byteArrayClass;
+jmethodID listenMethod, closeMethod, replyConstructor;
+
+jclass globalClass(JNIEnv *env, const char *name) {
+  auto local = gea::android::findAppClass(env, name);
+  auto global = static_cast<jclass>(env->NewGlobalRef(local));
+  env->DeleteLocalRef(local);
+  return global;
+}
+}
+
+bool gea::android::isLoopbackHttpRequest() { return loopbackRequest; }
+
+void gea_android_init_http(JNIEnv *env) {
+  serverClass = globalClass(env, "GeaNativeHttp");
+  replyClass = globalClass(env, "GeaNativeHttp$Reply");
+  auto array = env->FindClass("[B");
+  byteArrayClass = static_cast<jclass>(env->NewGlobalRef(array));
+  env->DeleteLocalRef(array);
+  listenMethod = env->GetStaticMethodID(serverClass, "listen", "(JI)Z");
+  closeMethod = env->GetStaticMethodID(serverClass, "close", "(J)V");
+  replyConstructor = env->GetMethodID(replyClass, "<init>", "(I[B[B[[B)V");
+}
+
+namespace gea::host::http {
+
+bool platform_listen(NativeHttpServerHandle handle, int port) {
+  android::JniEnv jni;
+  auto *env = jni.get();
+  return env && serverClass && env->CallStaticBooleanMethod(serverClass, listenMethod, static_cast<jlong>(handle), port);
+}
+
+void platform_close(NativeHttpServerHandle handle) {
+  android::JniEnv jni;
+  if (auto *env = jni.get(); env && serverClass)
+    env->CallStaticVoidMethod(serverClass, closeMethod, static_cast<jlong>(handle));
+}
+}
+
+extern "C" JNIEXPORT jobject JNICALL Java_@JNI_PREFIX@_GeaNativeHttp_request(
+    JNIEnv *env, jclass, jlong handle, jbyteArray method, jbyteArray path, jbyteArray query, jobjectArray headers, jbyteArray body, jboolean loopback) {
+  using namespace gea::host;
+  using gea::android::fromUtf8Bytes;
+  using gea::android::utf8Bytes;
+  const auto handler = http::handlerTable().find(handle);
+  if (handler == http::handlerTable().end() || !handler->second) return nullptr;
+  auto callback = handler->second;
+  HttpRequest request;
+  request.method = fromUtf8Bytes(env, method);
+  request.path = fromUtf8Bytes(env, path);
+  request.query = fromUtf8Bytes(env, query);
+  auto payload = fromUtf8Bytes(env, body);
+  request.body.assign(payload.begin(), payload.end());
+  for (jsize i = 0, end = env->GetArrayLength(headers); i + 1 < end; i += 2) {
+    auto name = static_cast<jbyteArray>(env->GetObjectArrayElement(headers, i));
+    auto value = static_cast<jbyteArray>(env->GetObjectArrayElement(headers, i + 1));
+    request.headers.push_back({fromUtf8Bytes(env, name), fromUtf8Bytes(env, value)});
+    env->DeleteLocalRef(name);
+    env->DeleteLocalRef(value);
+  }
+
+  HttpReply reply;
+  try {
+    RequestPeer peer(loopback == JNI_TRUE);
+    reply = callback(request);
+  } catch (...) {
+    reply.status = 500;
+    reply.body = "Request failed";
+  }
+  if (!reply.file.empty()) {
+    constexpr std::streamoff maxFile = 4 * 1024 * 1024;
+    std::ifstream file(reply.file, std::ios::binary | std::ios::ate);
+    const auto size = file.tellg();
+    if (size >= 0 && size <= maxFile) {
+      reply.body.resize(size);
+      file.seekg(0);
+      file.read(reply.body.data(), size);
+    }
+    if (!file || size < 0 || size > maxFile) {
+      reply.status = 404;
+      reply.contentType = "text/plain";
+      reply.body = "File not found";
+    }
+  }
+
+  auto replyHeaders = env->NewObjectArray(static_cast<jsize>(reply.headers.size() * 2), byteArrayClass, nullptr);
+  jsize i = 0;
+  for (const auto &header : reply.headers) {
+    auto name = utf8Bytes(env, header.name);
+    auto value = utf8Bytes(env, header.value);
+    env->SetObjectArrayElement(replyHeaders, i++, name);
+    env->SetObjectArrayElement(replyHeaders, i++, value);
+    env->DeleteLocalRef(name);
+    env->DeleteLocalRef(value);
+  }
+  return env->NewObject(replyClass, replyConstructor, reply.status,
+    utf8Bytes(env, reply.contentType), utf8Bytes(env, reply.body), replyHeaders);
+}

@@ -1,0 +1,103 @@
+package @PACKAGE@;
+
+import android.util.Base64;
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ConcurrentHashMap;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.WebSocket;
+import okhttp3.WebSocketListener;
+import okio.ByteString;
+
+final class GeaNativeWebSocket extends WebSocketListener {
+  private static final OkHttpClient client = new OkHttpClient();
+  private static final ConcurrentHashMap<Long, GeaNativeWebSocket> sockets = new ConcurrentHashMap<>();
+  private final long handle;
+  private WebSocket socket;
+
+  private GeaNativeWebSocket(long handle) { this.handle = handle; }
+
+  static native boolean opened(long handle);
+  static native void message(long handle, byte[] text);
+  static native void closing(long handle);
+  static native void closed(long handle, int code, byte[] reason);
+  static native void failed(long handle, byte[] reason);
+
+  static void open(long handle, String url, String protocols, String headers) {
+    GeaNativeWebSocket connection = new GeaNativeWebSocket(handle);
+    synchronized (connection) {
+      sockets.put(handle, connection);
+      try {
+        Request.Builder request = new Request.Builder().url(url);
+        for (String header : headers.split("\r\n")) {
+          int colon = header.indexOf(':');
+          if (colon > 0) request.addHeader(header.substring(0, colon), header.substring(colon + 1).trim());
+        }
+        if (!protocols.isEmpty()) request.header("Sec-WebSocket-Protocol", protocols);
+        connection.socket = client.newWebSocket(request.build(), connection);
+      } catch (IllegalArgumentException error) {
+        connection.onFailure(null, error, null);
+      }
+    }
+  }
+
+  static boolean send(long handle, byte[] data, boolean binaryBase64) {
+    GeaNativeWebSocket connection = sockets.get(handle);
+    if (connection == null) return false;
+    synchronized (connection) {
+      if (connection.socket == null) return false;
+      try {
+        return binaryBase64
+          ? connection.socket.send(ByteString.of(Base64.decode(data, Base64.DEFAULT)))
+          : connection.socket.send(new String(data, StandardCharsets.UTF_8));
+      } catch (IllegalArgumentException error) {
+        return false;
+      }
+    }
+  }
+
+  static long buffered(long handle) {
+    GeaNativeWebSocket connection = sockets.get(handle);
+    if (connection == null) return 0;
+    synchronized (connection) {
+      return connection.socket == null ? 0 : connection.socket.queueSize();
+    }
+  }
+
+  static void close(long handle, boolean destroy) {
+    GeaNativeWebSocket connection = destroy ? sockets.remove(handle) : sockets.get(handle);
+    if (connection == null) return;
+    synchronized (connection) {
+      if (connection.socket == null) return;
+      if (destroy) connection.socket.cancel();
+      else connection.socket.close(1000, null);
+    }
+  }
+
+  @Override public void onOpen(WebSocket socket, Response response) {
+    if (!opened(handle)) socket.cancel();
+  }
+
+  @Override public void onMessage(WebSocket socket, String text) {
+    message(handle, text.getBytes(StandardCharsets.UTF_8));
+  }
+
+  @Override public void onClosing(WebSocket socket, int code, String reason) {
+    closing(handle);
+    socket.close(1000, null);
+  }
+
+  @Override public void onClosed(WebSocket socket, int code, String reason) {
+    sockets.remove(handle);
+    closed(handle, code, reason.getBytes(StandardCharsets.UTF_8));
+  }
+
+  @Override public void onFailure(WebSocket socket, Throwable error, Response response) {
+    sockets.remove(handle);
+    String reason = response == null ? "WebSocket connection failed" : "WebSocket HTTP " + response.code();
+    byte[] text = reason.getBytes(StandardCharsets.UTF_8);
+    failed(handle, text);
+    closed(handle, 1006, text);
+  }
+}

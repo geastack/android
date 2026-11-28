@@ -1,0 +1,122 @@
+package @PACKAGE@;
+
+import android.Manifest;
+import android.content.pm.PackageManager;
+import android.media.AudioFormat;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
+import java.util.HashSet;
+import java.util.Set;
+
+final class GeaNativeCapture {
+  private static final Set<Long> tracks = new HashSet<>();
+  private static MainActivity activity;
+  private static Capture active;
+  private static boolean foreground;
+  private static boolean requesting;
+  private static boolean denied;
+  private static int sampleRate;
+
+  static final int PERMISSION_REQUEST = 712;
+  static native void samples(long track, short[] samples, int count);
+
+  static synchronized void resume(MainActivity host) {
+    activity = host;
+    foreground = true;
+    update();
+  }
+
+  static synchronized void pause() {
+    foreground = false;
+    activity = null;
+    update();
+  }
+
+  static synchronized void permissionResult(boolean granted) {
+    requesting = false;
+    denied = !granted;
+    update();
+  }
+
+  static synchronized int requestPermission() {
+    if (activity == null) return 0;
+    if (activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) return 1;
+    if (!requesting) {
+      requesting = true;
+      denied = false;
+      MainActivity host = activity;
+      host.runOnUiThread(() -> host.requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, PERMISSION_REQUEST));
+    }
+    return 0;
+  }
+
+  static synchronized int permissionState() {
+    if (activity != null && activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) return 1;
+    return denied ? -1 : 0;
+  }
+
+  static synchronized void track(long track, boolean enabled, int rate) {
+    if (enabled) {
+      if (tracks.isEmpty()) requestPermission();
+      tracks.add(track);
+      sampleRate = rate;
+    } else {
+      tracks.remove(track);
+    }
+    update();
+  }
+
+  private static void update() {
+    if (!foreground || tracks.isEmpty() || permissionState() != 1) {
+      Capture old = active;
+      active = null;
+      if (old != null) old.stopCapture();
+    } else if (active == null) {
+      int minimum = AudioRecord.getMinBufferSize(sampleRate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
+      if (minimum <= 0) return;
+      AudioRecord record = null;
+      try {
+        record = new AudioRecord(MediaRecorder.AudioSource.VOICE_RECOGNITION, sampleRate,
+          AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(minimum, sampleRate / 5 * 2));
+        record.startRecording();
+        active = new Capture(record, sampleRate);
+        active.start();
+      } catch (IllegalStateException | IllegalArgumentException | SecurityException error) {
+        if (record != null) record.release();
+      }
+    }
+  }
+
+  private static final class Capture extends Thread {
+    final AudioRecord record;
+    final short[] buffer;
+    volatile boolean running = true;
+
+    Capture(AudioRecord record, int rate) {
+      super("Gea microphone");
+      this.record = record;
+      buffer = new short[rate / 50];
+    }
+
+    void stopCapture() { running = false; }
+
+    @Override public void run() {
+      try {
+        while (running) {
+          int count = record.read(buffer, 0, buffer.length);
+          if (count < 0) break;
+          if (count == 0) continue;
+          synchronized (GeaNativeCapture.class) {
+            if (active != this) break;
+            for (long track : tracks) samples(track, buffer, count);
+          }
+        }
+      } finally {
+        synchronized (GeaNativeCapture.class) {
+          if (active == this) active = null;
+          record.release();
+        }
+      }
+    }
+  }
+}

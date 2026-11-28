@@ -1,0 +1,6 @@
+b1050081b14bb7a3a7e55a4d3ef01b5dcfabc453b4573a4fc019767191d5f4e0 com/squareup/okhttp3/okhttp/4.12.0/okhttp-4.12.0.jar
+67543f0736fc422ae927ed0e504b98bc5e269fda0d3500579337cb713da28412 com/squareup/okio/okio-jvm/3.6.0/okio-jvm-3.6.0.jar
+55e989c512b80907799f854309f3bc7782c5b3d13932442d0379d5c472711504 org/jetbrains/kotlin/kotlin-stdlib/1.9.10/kotlin-stdlib-1.9.10.jar
+ac6361bf9ad1ed382c2103d9712c47cdec166232b4903ed596e8876b0681c9b7 org/jetbrains/kotlin/kotlin-stdlib-jdk7/1.9.10/kotlin-stdlib-jdk7-1.9.10.jar
+a4c74d94d64ce1abe53760fe0389dd941f6fc558d0dab35e47c085a11ec80f28 org/jetbrains/kotlin/kotlin-stdlib-jdk8/1.9.10/kotlin-stdlib-jdk8-1.9.10.jar
+de864c47818157141a24c9acb36df0c47d7bf15b7ff48c90610f3eb4e5df0e58 org/nanohttpd/nanohttpd/2.3.1/nanohttpd-2.3.1.jar

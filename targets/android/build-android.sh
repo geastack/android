@@ -399,8 +399,12 @@ JNI_PREFIX="$(jni_prefix_from_package "$PACKAGE_NAME")"
 MIN_SDK="${GEA_ANDROID_MIN_SDK:-23}"
 TARGET_SDK="${ANDROID_PLATFORM_DIR##*-}"
 ABI="${GEA_ANDROID_ABI:-arm64-v8a}"
-ORIENTATION="${GEA_ANDROID_SCREEN_ORIENTATION:-portrait}"
-DEVICE_PIXEL_RATIO="${GEA_ANDROID_DEVICE_PIXEL_RATIO:-1.5}"
+ORIENTATION="${GEA_ANDROID_SCREEN_ORIENTATION:-$(node -p 'require(process.argv[1]).gea?.targets?.android?.screenOrientation ?? "portrait"' "$APP_DIR/package.json")}"
+case "$ORIENTATION" in
+  unspecified|behind|landscape|portrait|reverseLandscape|reversePortrait|sensorLandscape|sensorPortrait|userLandscape|userPortrait|sensor|fullSensor|nosensor|user|fullUser|locked) ;;
+  *) echo "ERROR: unsupported Android screen orientation: $ORIENTATION" >&2; exit 1 ;;
+esac
+DEVICE_PIXEL_RATIO="${GEA_ANDROID_DEVICE_PIXEL_RATIO:-$(node -p 'require(process.argv[1]).gea?.targets?.android?.devicePixelRatio ?? 1.5' "$APP_DIR/package.json")}"
 OUTPUT_ROOT="${GEA_ANDROID_OUTPUT_DIR:-$APP_DIR/dist/android}"
 DIST_DIR="$OUTPUT_ROOT/$APP_ID"
 BUILD_DIR="$DIST_DIR/build"
@@ -426,6 +430,12 @@ esac
 rm -rf "$BUILD_DIR"
 mkdir -p "$GENERATED_DIR" "$DIST_DIR" "$ANDROID_BUILD_DIR" "$NATIVE_BUILD_DIR"
 
+NATIVE_PLUGIN_ARGS=()
+NATIVE_PLUGIN="$APP_DIR/android/geatsc-native-plugin.mjs"
+if [ -f "$NATIVE_PLUGIN" ]; then
+  NATIVE_PLUGIN_ARGS+=(--extra-geatsc-plugin "$NATIVE_PLUGIN")
+fi
+
 echo "Generating native Gea C++ for $APP_ID..."
 node "$GEA_CORE_DIR/scripts/build-gea-vite-geatsc.mjs" \
   --app-dir "$APP_DIR" \
@@ -434,6 +444,7 @@ node "$GEA_CORE_DIR/scripts/build-gea-vite-geatsc.mjs" \
   --font-device-pixel-ratio "${GEA_ANDROID_FONT_DEVICE_PIXEL_RATIOS:-1,1.5,2,3}" \
   --font-viewport-width "${GEA_ANDROID_FONT_VIEWPORT_WIDTHS:-480}" \
   --font-viewport-height "${GEA_ANDROID_FONT_VIEWPORT_HEIGHTS:-640}" \
+  ${NATIVE_PLUGIN_ARGS[@]+"${NATIVE_PLUGIN_ARGS[@]}"} \
   --cxx-standard c++20
 if [ ! -f "$GENERATED_DIR/gea_runtime.cpp" ]; then
   printf '#include "%s"\n' "$GEA_COMPILER_DIR/dist/targets/cpp/runtime/runtime.cpp" > "$GENERATED_DIR/gea_runtime.cpp"
@@ -512,12 +523,10 @@ while IFS= read -r native_source; do
       APP_NATIVE_HEADER_INCLUDES+=("$resolved_source")
       ;;
   esac
-done < <(node - "$APP_DIR/package.json" <<'NODE'
-const fs = require('fs')
-const manifestPath = process.argv[2]
-const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
-for (const source of manifest.gea?.nativeSources ?? []) {
-  if (typeof source === 'string' && source.length > 0) console.log(source)
+done < <(node - "$APP_JSON" <<'NODE'
+const app = JSON.parse(process.argv[2])
+for (const source of [...(app.nativeSourcePaths ?? app.nativeSources ?? []), ...(app.targetNativeSourcePaths?.android ?? [])]) {
+  console.log(source)
 }
 NODE
 )
@@ -549,12 +558,16 @@ XML
   ANDROID_ICON_ATTRIBUTES+=('      android:roundIcon="@mipmap/gea_launcher_icon"')
 fi
 
-for template in MainActivity.java GeaNativeBridge.java GeaNativeView.java GeaNativeAudio.java; do
+for template in MainActivity.java GeaNativeBridge.java GeaNativeView.java GeaNativeAudio.java GeaNativeCapture.java GeaNativeWebSocket.java GeaNativeHttp.java; do
   sed \
     -e "s/@PACKAGE@/$PACKAGE_NAME/g" \
     -e "s/@DEVICE_PIXEL_RATIO@/$DEVICE_PIXEL_RATIO/g" \
     -e "s/@DEBUG_VIEW_BOUNDS@/$DEBUG_VIEW_BOUNDS/g" \
     "$NATIVE_TEMPLATE_DIR/$template.in" > "$JAVA_SRC_DIR/$PACKAGE_PATH/$template"
+done
+for source in "$APP_DIR"/android/*.java; do
+  [ -f "$source" ] || continue
+  sed -e "s/@PACKAGE@/$PACKAGE_NAME/g" "$source" > "$JAVA_SRC_DIR/$PACKAGE_PATH/$(basename "$source")"
 done
 node - "$APP_DIR" "$(pwd -P)" "$FONT_ASSETS_DIR" "$JAVA_SRC_DIR/$PACKAGE_PATH/GeaFontAssets.java" "$PACKAGE_NAME" <<'NODE'
 const fs = require('fs')
@@ -688,6 +701,11 @@ cmake_q() {
   node -e "process.stdout.write(JSON.stringify(process.argv[1] || ''))" -- "$1"
 }
 
+for template in android_services.cpp android_http.cpp; do
+  sed -e "s/@JNI_PREFIX@/$JNI_PREFIX/g" -e "s|@PACKAGE_PATH@|$PACKAGE_PATH|g" \
+    "$NATIVE_TEMPLATE_DIR/$template.in" > "$NATIVE_BUILD_DIR/$template"
+done
+
 {
   echo 'cmake_minimum_required(VERSION 3.22)'
   echo 'project(gea_android_native LANGUAGES C CXX)'
@@ -696,15 +714,15 @@ cmake_q() {
   echo 'set(CMAKE_CXX_EXTENSIONS OFF)'
   echo 'add_library(gea_android SHARED'
   printf '  %s\n' "$(cmake_q "$NATIVE_BUILD_DIR/android_jni.cpp")"
+  printf '  %s\n' "$(cmake_q "$NATIVE_BUILD_DIR/android_services.cpp")"
+  printf '  %s\n' "$(cmake_q "$NATIVE_BUILD_DIR/android_http.cpp")"
   printf '  %s\n' "$(cmake_q "$NATIVE_TEMPLATE_DIR/android_display.cpp")"
   printf '  %s\n' "$(cmake_q "$NATIVE_TEMPLATE_DIR/android_timers.cpp")"
   printf '  %s\n' "$(cmake_q "$NATIVE_TEMPLATE_DIR/android_memory.cpp")"
   printf '  %s\n' "$(cmake_q "$NATIVE_TEMPLATE_DIR/android_audio.cpp")"
   printf '  %s\n' "$(cmake_q "$NATIVE_TEMPLATE_DIR/android_network.cpp")"
   printf '  %s\n' "$(cmake_q "$NATIVE_TEMPLATE_DIR/android_platform_stubs.cpp")"
-  printf '  %s\n' "$(cmake_q "$NATIVE_TEMPLATE_DIR/android_apps.c")"
   printf '  %s\n' "$(cmake_q "$GEA_CORE_DIR/gea_app_entry.cpp")"
-  [ -f "$GEA_GEAOS_PACKAGE_DIR/resident_apps.cpp" ] && printf '  %s\n' "$(cmake_q "$GEA_GEAOS_PACKAGE_DIR/resident_apps.cpp")"
   for src in "${GEATSC_GENERATED_SOURCES[@]}"; do printf '  %s\n' "$(cmake_q "$src")"; done
   printf '  %s\n' "$(cmake_q "$GENERATED_DIR/gea_embedded_font_generated.cpp")"
   printf '  %s\n' "$(cmake_q "$GENERATED_DIR/gea_embedded_assets_generated.cpp")"
@@ -729,6 +747,7 @@ cmake_q() {
   echo ')'
   echo 'target_link_libraries(gea_android PRIVATE log android)'
   echo 'target_include_directories(gea_android PRIVATE'
+  printf '  %s\n' "$(cmake_q "$NATIVE_TEMPLATE_DIR")"
   printf '  %s\n' "$(cmake_q "$GENERATED_DIR")"
   for inc in ${APP_NATIVE_INCLUDE_DIRS[@]+"${APP_NATIVE_INCLUDE_DIRS[@]}"}; do printf '  %s\n' "$(cmake_q "$inc")"; done
   for inc in "${GEA_FW_INCLUDES[@]}"; do printf '  %s\n' "$(cmake_q "$inc")"; done
@@ -759,11 +778,13 @@ APP_LABEL="$(xml_escape "$APP_NAME")"
 {
   echo "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\" package=\"$PACKAGE_NAME\">"
   echo "  <uses-permission android:name=\"android.permission.INTERNET\" />"
+  echo "  <uses-permission android:name=\"android.permission.RECORD_AUDIO\" />"
+  echo "  <uses-feature android:name=\"android.hardware.microphone\" android:required=\"false\" />"
   echo "  <uses-permission android:name=\"android.permission.ACCESS_NETWORK_STATE\" />"
   echo "  <application"
   echo "      android:theme=\"@style/GeaAndroidTheme\""
   echo "      android:label=\"$APP_LABEL\""
-  for attr in "${ANDROID_ICON_ATTRIBUTES[@]}"; do
+  for attr in ${ANDROID_ICON_ATTRIBUTES[@]+"${ANDROID_ICON_ATTRIBUTES[@]}"}; do
     echo "$attr"
   done
   echo "      android:hardwareAccelerated=\"true\""
@@ -814,10 +835,30 @@ SIGNED_APK="$DIST_DIR/$APP_ID-debug.apk"
   -R "$COMPILED_RES" \
   --auto-add-overlay
 
+JAVA_DEP_DIR="$DIST_DIR/java-deps"
+mkdir -p "$JAVA_DEP_DIR"
+JAVA_DEPS=()
+while read -r checksum artifact; do
+  jar="$JAVA_DEP_DIR/${artifact##*/}"
+  verify_jar() {
+    printf '%s  %s\n' "$checksum" "$jar" | shasum -a 256 -c --status
+  }
+  if [ ! -f "$jar" ] || ! verify_jar; then
+    curl --fail --silent --show-error --location \
+      "https://repo.maven.apache.org/maven2/$artifact" -o "$jar"
+    if ! verify_jar; then
+      echo "ERROR: checksum mismatch for $artifact" >&2
+      exit 1
+    fi
+  fi
+  JAVA_DEPS+=("$jar")
+done < "$NATIVE_TEMPLATE_DIR/java-dependencies.txt"
+JAVA_CLASSPATH="$ANDROID_JAR"
+for jar in "${JAVA_DEPS[@]}"; do JAVA_CLASSPATH="$JAVA_CLASSPATH:$jar"; done
 find "$JAVA_SRC_DIR" "$GEN_DIR" -name '*.java' -print0 \
-  | xargs -0 javac -source 1.8 -target 1.8 -bootclasspath "$ANDROID_JAR" -classpath "$ANDROID_JAR" -d "$CLASSES_DIR"
+  | xargs -0 javac --release 8 -classpath "$JAVA_CLASSPATH" -d "$CLASSES_DIR"
 find "$CLASSES_DIR" -name '*.class' -print0 \
-  | xargs -0 "$D8" --min-api "$MIN_SDK" --lib "$ANDROID_JAR" --output "$DEX_DIR"
+  | xargs -0 "$D8" --min-api "$MIN_SDK" --lib "$ANDROID_JAR" --output "$DEX_DIR" "${JAVA_DEPS[@]}"
 
 cp "$UNSIGNED_APK" "$DEX_APK"
 zip -q -j "$DEX_APK" "$DEX_DIR/classes.dex"

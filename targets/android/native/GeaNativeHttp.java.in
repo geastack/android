@@ -1,0 +1,216 @@
+package @PACKAGE@;
+
+import fi.iki.elonen.NanoHTTPD;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
+import android.util.Log;
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
+import java.io.FilterOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.InetAddress;
+import java.net.Socket;
+import java.net.SocketException;
+import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
+final class GeaNativeHttp extends NanoHTTPD {
+  private static final String TAG = "GeaNativeHttp";
+  private static final int MAX_BODY = 1024 * 1024;
+  private static final int MAX_CLIENTS = 8;
+  private static final Map<Long, GeaNativeHttp> servers = new HashMap<>();
+  private static final AtomicInteger nextConnection = new AtomicInteger();
+  private static final ThreadLocal<Integer> connectionId = new ThreadLocal<>();
+  private static final Handler main = new Handler(Looper.getMainLooper());
+  private final long handle;
+  private final AtomicInteger clients = new AtomicInteger();
+  private volatile boolean active = true;
+
+  static final class Reply {
+    final int status;
+    final byte[] contentType, body;
+    final byte[][] headers;
+    Reply(int status, byte[] contentType, byte[] body, byte[][] headers) {
+      this.status = status;
+      this.contentType = contentType;
+      this.body = body;
+      this.headers = headers;
+    }
+  }
+
+  private GeaNativeHttp(long handle, int port) {
+    super(port);
+    this.handle = handle;
+    setAsyncRunner(new DefaultAsyncRunner() {
+      @Override public void exec(ClientHandler client) {
+        if (clients.incrementAndGet() <= MAX_CLIENTS) {
+          super.exec(client);
+        } else {
+          clients.decrementAndGet();
+          client.close();
+        }
+      }
+
+      @Override public void closed(ClientHandler client) {
+        super.closed(client);
+        clients.decrementAndGet();
+      }
+    });
+  }
+
+  private static void timing(int id, String phase, long started) {
+    if (Log.isLoggable(TAG, Log.DEBUG)) {
+      Log.d(TAG, "connection=" + id + " " + phase + " elapsed_ms=" + (SystemClock.elapsedRealtime() - started));
+    }
+  }
+
+  @Override protected ClientHandler createClientHandler(Socket socket, InputStream input) {
+    final int id = nextConnection.incrementAndGet();
+    final long accepted = SystemClock.elapsedRealtime();
+    timing(id, "accepted", accepted);
+    return new ClientHandler(input, socket) {
+      @Override public void run() {
+        connectionId.set(id);
+        try {
+          InetAddress peer = socket.getInetAddress();
+          // NanoHTTPD asks for a hostname during session construction. Supply
+          // the numeric address as the name so Android skips reverse DNS.
+          InetAddress numericPeer = InetAddress.getByAddress(peer.getHostAddress(), peer.getAddress());
+          FilterOutputStream output = new FilterOutputStream(socket.getOutputStream()) {
+            @Override public void write(byte[] data, int offset, int length) throws IOException {
+              out.write(data, offset, length);
+            }
+
+            @Override public void flush() throws IOException {
+              super.flush();
+              timing(id, "response-flushed", accepted);
+            }
+          };
+          HTTPSession session = new HTTPSession(getTempFileManagerFactory().create(), input, output, numericPeer);
+          timing(id, "session-ready", accepted);
+          while (!socket.isClosed()) {
+            session.execute();
+          }
+        } catch (SocketTimeoutException error) {
+          timing(id, "socket-timeout", accepted);
+        } catch (SocketException error) {
+          if (!"NanoHttpd Shutdown".equals(error.getMessage())) Log.w(TAG, "HTTP socket failed");
+        } catch (IOException error) {
+          Log.w(TAG, "HTTP session failed");
+        } finally {
+          close();
+          asyncRunner.closed(this);
+          connectionId.remove();
+          timing(id, "closed", accepted);
+        }
+      }
+    };
+  }
+
+  static synchronized boolean listen(long handle, int port) {
+    if (port <= 0 || port > 65535 || servers.containsKey(handle)) return false;
+    GeaNativeHttp server = new GeaNativeHttp(handle, port);
+    try {
+      server.start(5000, true);
+      servers.put(handle, server);
+      return true;
+    } catch (IOException error) {
+      server.stop();
+      return false;
+    }
+  }
+
+  static synchronized void close(long handle) {
+    GeaNativeHttp server = servers.remove(handle);
+    if (server == null) return;
+    server.active = false;
+    server.stop();
+  }
+
+  private static native Reply request(long handle, byte[] method, byte[] path, byte[] query, byte[][] headers, byte[] body, boolean loopback);
+
+  @Override public Response serve(IHTTPSession session) {
+    final int id = connectionId.get();
+    final long received = SystemClock.elapsedRealtime();
+    timing(id, "headers-parsed", received);
+    if (session.getHeaders().containsKey("transfer-encoding"))
+      return newFixedLengthResponse(Response.Status.BAD_REQUEST, MIME_PLAINTEXT, "Unsupported transfer encoding");
+    int length;
+    try {
+      String contentLength = session.getHeaders().get("content-length");
+      length = contentLength == null ? 0 : Integer.parseInt(contentLength);
+    } catch (NumberFormatException error) {
+      return newFixedLengthResponse(Response.Status.BAD_REQUEST, MIME_PLAINTEXT, "Invalid content length");
+    }
+    if (length < 0 || length > MAX_BODY)
+      return newFixedLengthResponse(Response.Status.PAYLOAD_TOO_LARGE, MIME_PLAINTEXT, "Request too large");
+    byte[] body = new byte[length];
+    try {
+      new DataInputStream(session.getInputStream()).readFully(body);
+    } catch (IOException error) {
+      return newFixedLengthResponse(Response.Status.BAD_REQUEST, MIME_PLAINTEXT, "Incomplete request");
+    }
+
+    timing(id, "body-read", received);
+
+    byte[][] headers = new byte[session.getHeaders().size() * 2][];
+    int index = 0;
+    for (Map.Entry<String, String> header : session.getHeaders().entrySet()) {
+      headers[index++] = bytes(header.getKey());
+      headers[index++] = bytes(header.getValue());
+    }
+    byte[] method = bytes(session.getMethod().name());
+    byte[] path = bytes(session.getUri());
+    byte[] query = bytes(session.getQueryParameterString());
+    String host = session.getHeaders().get("host");
+    boolean loopback = session.getRemoteIpAddress().equals("127.0.0.1")
+      && ("127.0.0.1".equals(host) || (host != null && host.matches("127\\.0\\.0\\.1:[0-9]{1,5}")));
+    final long queued = SystemClock.elapsedRealtime();
+    FutureTask<Reply> pending = new FutureTask<>(() -> {
+      final long started = SystemClock.elapsedRealtime();
+      timing(id, "handler-start", queued);
+      try {
+        return active ? request(handle, method, path, query, headers, body, loopback) : null;
+      } finally {
+        timing(id, "handler-finish", started);
+      }
+    });
+    main.post(pending);
+    try {
+      Reply reply = pending.get(5, TimeUnit.SECONDS);
+      if (reply == null) return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Not found");
+      Response.IStatus status = Response.Status.lookup(reply.status);
+      if (status == null) return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Invalid status");
+      Response response = newFixedLengthResponse(status, text(reply.contentType), new ByteArrayInputStream(reply.body), reply.body.length);
+      for (int i = 0; i < reply.headers.length; i += 2) {
+        String name = text(reply.headers[i]);
+        String value = text(reply.headers[i + 1]);
+        String lower = name.toLowerCase(Locale.ROOT);
+        if (lower.equals("connection") || lower.equals("content-length") || lower.equals("transfer-encoding")) continue;
+        if (name.matches("[A-Za-z0-9!#$%&'*+.^_`|~-]+") && value.indexOf('\r') < 0 && value.indexOf('\n') < 0)
+          response.addHeader(name, value);
+      }
+      response.closeConnection(true);
+      timing(id, "response-ready status=" + reply.status + " bytes=" + reply.body.length, received);
+      return response;
+    } catch (Exception error) {
+      timing(id, "handler-failed", queued);
+      pending.cancel(false);
+      return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Request failed");
+    }
+  }
+
+  private static byte[] bytes(String value) {
+    return value == null ? new byte[0] : value.getBytes(StandardCharsets.UTF_8);
+  }
+
+  private static String text(byte[] value) { return new String(value, StandardCharsets.UTF_8); }
+}
